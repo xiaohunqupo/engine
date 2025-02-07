@@ -399,7 +399,7 @@ class Vec3 {
      *
      * a.mul(b);
      *
-     * // Outputs 8, 15, 24
+     * // Outputs [8, 15, 24]
      * console.log("The result of the multiplication is: " + a.toString());
      */
     mul(rhs) {
@@ -423,7 +423,7 @@ class Vec3 {
      *
      * r.mul2(a, b);
      *
-     * // Outputs 8, 15, 24
+     * // Outputs [8, 15, 24]
      * console.log("The result of the multiplication is: " + r.toString());
      */
     mul2(lhs, rhs) {
@@ -466,7 +466,7 @@ class Vec3 {
      *
      * v.normalize();
      *
-     * // Outputs 1, 0, 0
+     * // Outputs [1, 0, 0]
      * console.log("The result of the vector normalization is: " + v.toString());
      */
     normalize(src = this) {
@@ -557,7 +557,7 @@ class Vec3 {
      *
      * v.project(normal);
      *
-     * // Outputs 5, 0, 0
+     * // Outputs [5, 0, 0]
      * console.log("The result of the vector projection is: " + v.toString());
      */
     project(rhs) {
@@ -581,7 +581,7 @@ class Vec3 {
      * const v = new pc.Vec3();
      * v.set(5, 10, 20);
      *
-     * // Outputs 5, 10, 20
+     * // Outputs [5, 10, 20]
      * console.log("The result of the vector set is: " + v.toString());
      */
     set(x, y, z) {
@@ -660,6 +660,26 @@ class Vec3 {
     }
 
     /**
+     * Set the values of the vector from an array.
+     *
+     * @param {number[]|ArrayBufferView} arr - The array to set the vector values from.
+     * @param {number} [offset] - The zero-based index at which to start copying elements from the
+     * array. Default is 0.
+     * @returns {Vec3} Self for chaining.
+     * @example
+     * const v = new pc.Vec3();
+     * v.fromArray([20, 10, 5]);
+     * // v is set to [20, 10, 5]
+     */
+    fromArray(arr, offset = 0) {
+        this.x = arr[offset] ?? this.x;
+        this.y = arr[offset + 1] ?? this.y;
+        this.z = arr[offset + 2] ?? this.z;
+
+        return this;
+    }
+
+    /**
      * Converts the vector to string form.
      *
      * @returns {string} The vector in string form.
@@ -673,12 +693,41 @@ class Vec3 {
     }
 
     /**
+     * Converts the vector to an array.
+     *
+     * @param {number[]|ArrayBufferView} [arr] - The array to populate with the color components. If not specified,
+     * a new array is created.
+     * @param {number} [offset] - The zero-based index at which to start copying elements to the
+     * array. Default is 0.
+     * @returns {number[]|ArrayBufferView} The vector as an array.
+     * @example
+     * const v = new pc.Vec3(20, 10, 5);
+     * // Outputs [20, 10, 5]
+     * console.log(v.toArray());
+     */
+    toArray(arr = [], offset = 0) {
+        arr[offset] = this.x;
+        arr[offset + 1] = this.y;
+        arr[offset + 2] = this.z;
+
+        return arr;
+    }
+
+    /**
      * A constant vector set to [0, 0, 0].
      *
      * @type {Vec3}
      * @readonly
      */
     static ZERO = Object.freeze(new Vec3(0, 0, 0));
+
+    /**
+     * A constant vector set to [0.5, 0.5, 0.5].
+     *
+     * @type {Vec3}
+     * @readonly
+     */
+    static HALF = Object.freeze(new Vec3(0.5, 0.5, 0.5));
 
     /**
      * A constant vector set to [1, 1, 1].

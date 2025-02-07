@@ -4,9 +4,26 @@ import { AssetReference } from '../../asset/asset-reference.js';
 import { Component } from '../component.js';
 
 /**
- * Enables an Entity to render a Gaussian Splat (asset of the 'gsplat' type).
+ * @import { BoundingBox } from '../../../core/shape/bounding-box.js'
+ * @import { Entity } from '../../entity.js'
+ * @import { EventHandle } from '../../../core/event-handle.js'
+ * @import { GSplatComponentSystem } from './system.js'
+ * @import { GSplatInstance } from '../../../scene/gsplat/gsplat-instance.js'
+ * @import { Material } from '../../../scene/materials/material.js'
+ * @import { SplatMaterialOptions } from '../../../scene/gsplat/gsplat-material.js'
+ */
+
+/**
+ * The GSplatComponent enables an {@link Entity} to render 3D Gaussian Splats. Splats are always
+ * loaded from {@link Asset}s rather than being created programmatically. The asset type is
+ * `gsplat` which are in the `.ply` file format.
  *
- * @augments Component
+ * Relevant examples:
+ *
+ * - [Loading a Splat](https://playcanvas.github.io/#/loaders/gsplat)
+ * - [Custom Splat Shaders](https://playcanvas.github.io/#/loaders/gsplat-many)
+ *
+ * @hideconstructor
  * @category Graphics
  */
 class GSplatComponent extends Component {
@@ -14,13 +31,13 @@ class GSplatComponent extends Component {
     _layers = [LAYERID_WORLD]; // assign to the default world layer
 
     /**
-     * @type {import('../../../scene/gsplat/gsplat-instance.js').GSplatInstance|null}
+     * @type {GSplatInstance|null}
      * @private
      */
     _instance = null;
 
     /**
-     * @type {import('../../../core/shape/bounding-box.js').BoundingBox|null}
+     * @type {BoundingBox|null}
      * @private
      */
     _customAabb = null;
@@ -32,18 +49,34 @@ class GSplatComponent extends Component {
     _assetReference;
 
     /**
-     * @type {import('../../../scene/gsplat/gsplat-material.js').SplatMaterialOptions|null}
+     * @type {SplatMaterialOptions|null}
      * @private
      */
     _materialOptions = null;
 
     /**
+     * @type {EventHandle|null}
+     * @private
+     */
+    _evtLayersChanged = null;
+
+    /**
+     * @type {EventHandle|null}
+     * @private
+     */
+    _evtLayerAdded = null;
+
+    /**
+     * @type {EventHandle|null}
+     * @private
+     */
+    _evtLayerRemoved = null;
+
+    /**
      * Create a new GSplatComponent.
      *
-     * @param {import('./system.js').GSplatComponentSystem} system - The ComponentSystem that
-     * created this Component.
-     * @param {import('../../entity.js').Entity} entity - The Entity that this Component is
-     * attached to.
+     * @param {GSplatComponentSystem} system - The ComponentSystem that created this Component.
+     * @param {Entity} entity - The Entity that this Component is attached to.
      */
     constructor(system, entity) {
         super(system, entity);
@@ -70,25 +103,30 @@ class GSplatComponent extends Component {
     }
 
     /**
-     * If set, the object space bounding box is used as a bounding box for visibility culling of
-     * attached gsplat. This allows a custom bounding box to be specified.
+     * Sets a custom object space bounding box for visibility culling of the attached gsplat.
      *
-     * @type {import('../../../core/shape/bounding-box.js').BoundingBox}
+     * @type {BoundingBox|null}
      */
     set customAabb(value) {
         this._customAabb = value;
 
         // set it on meshInstance
-        this._instance?.meshInstance.setCustomAabb(this._customAabb);
+        this._instance?.meshInstance?.setCustomAabb(this._customAabb);
     }
 
+    /**
+     * Gets the custom object space bounding box for visibility culling of the attached gsplat.
+     *
+     * @type {BoundingBox|null}
+     */
     get customAabb() {
         return this._customAabb;
     }
 
     /**
-     * A {@link GSplatInstance} contained in the component. If not set or loaded, it returns null.
+     * Sets a {@link GSplatInstance} on the component. If not set or loaded, it returns null.
      *
+     * @type {GSplatInstance|null}
      * @ignore
      */
     set instance(value) {
@@ -98,7 +136,7 @@ class GSplatComponent extends Component {
 
         this._instance = value;
 
-        if (this._instance) {
+        if (this._instance?.meshInstance) {
 
             // if mesh instance was created without a node, assign it here
             const mi = this._instance.meshInstance;
@@ -119,6 +157,12 @@ class GSplatComponent extends Component {
         }
     }
 
+    /**
+     * Gets the {@link GSplatInstance} on the component.
+     *
+     * @type {GSplatInstance|null}
+     * @ignore
+     */
     get instance() {
         return this._instance;
     }
@@ -137,17 +181,17 @@ class GSplatComponent extends Component {
     }
 
     /**
-     * Material used to render the gsplat.
+     * Gets the material used to render the gsplat.
      *
-     * @type {import('../../../scene/materials/material.js').Material|undefined}
+     * @type {Material|undefined}
      */
     get material() {
         return this._instance?.material;
     }
 
     /**
-     * An array of layer IDs ({@link Layer#id}) to which gsplats should belong. Don't push, pop,
-     * splice or modify this array, if you want to change it - set a new one instead.
+     * Sets an array of layer IDs ({@link Layer#id}) to which this gsplat should belong. Don't
+     * push, pop, splice or modify this array. If you want to change it, set a new one instead.
      *
      * @type {number[]}
      */
@@ -163,19 +207,25 @@ class GSplatComponent extends Component {
         }
 
         // don't add into layers until we're enabled
-        if (!this.enabled || !this.entity.enabled)
+        if (!this.enabled || !this.entity.enabled) {
             return;
+        }
 
         // add the mesh instance to new layers
         this.addToLayers();
     }
 
+    /**
+     * Gets the array of layer IDs ({@link Layer#id}) to which this gsplat belongs.
+     *
+     * @type {number[]}
+     */
     get layers() {
         return this._layers;
     }
 
     /**
-     * The gsplat asset for the gsplat component - can also be an asset id.
+     * Sets the gsplat asset for this gsplat component. Can also be an asset id.
      *
      * @type {Asset|number}
      */
@@ -195,6 +245,11 @@ class GSplatComponent extends Component {
         }
     }
 
+    /**
+     * Gets the gsplat asset id for this gsplat component.
+     *
+     * @type {Asset|number}
+     */
     get asset() {
         return this._assetReference.id;
     }
@@ -289,10 +344,13 @@ class GSplatComponent extends Component {
 
     onEnable() {
         const scene = this.system.app.scene;
-        scene.on('set:layers', this.onLayersChanged, this);
-        if (scene.layers) {
-            scene.layers.on('add', this.onLayerAdded, this);
-            scene.layers.on('remove', this.onLayerRemoved, this);
+        const layers = scene.layers;
+
+        this._evtLayersChanged = scene.on('set:layers', this.onLayersChanged, this);
+
+        if (layers) {
+            this._evtLayerAdded = layers.on('add', this.onLayerAdded, this);
+            this._evtLayerRemoved = layers.on('remove', this.onLayerRemoved, this);
         }
 
         if (this._instance) {
@@ -304,10 +362,16 @@ class GSplatComponent extends Component {
 
     onDisable() {
         const scene = this.system.app.scene;
-        scene.off('set:layers', this.onLayersChanged, this);
-        if (scene.layers) {
-            scene.layers.off('add', this.onLayerAdded, this);
-            scene.layers.off('remove', this.onLayerRemoved, this);
+        const layers = scene.layers;
+
+        this._evtLayersChanged?.off();
+        this._evtLayersChanged = null;
+
+        if (layers) {
+            this._evtLayerAdded?.off();
+            this._evtLayerAdded = null;
+            this._evtLayerRemoved?.off();
+            this._evtLayerRemoved = null;
         }
 
         this.removeFromLayers();
@@ -332,8 +396,9 @@ class GSplatComponent extends Component {
     }
 
     _onGSplatAssetAdded() {
-        if (!this._assetReference.asset)
+        if (!this._assetReference.asset) {
             return;
+        }
 
         if (this._assetReference.asset.resource) {
             this._onGSplatAssetLoad();

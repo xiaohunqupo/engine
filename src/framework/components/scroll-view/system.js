@@ -1,10 +1,11 @@
-import { Component } from '../component.js';
+import { Vec2 } from '../../../core/math/vec2.js';
 import { ComponentSystem } from '../system.js';
-
 import { ScrollViewComponent } from './component.js';
 import { ScrollViewComponentData } from './data.js';
 
-import { Vec2 } from '../../../core/math/vec2.js';
+/**
+ * @import { AppBase } from '../../app-base.js'
+ */
 
 const _schema = [
     { name: 'enabled', type: 'boolean' },
@@ -17,11 +18,7 @@ const _schema = [
     { name: 'useMouseWheel', type: 'boolean' },
     { name: 'mouseWheelSensitivity', type: 'vec2' },
     { name: 'horizontalScrollbarVisibility', type: 'number' },
-    { name: 'verticalScrollbarVisibility', type: 'number' },
-    { name: 'viewportEntity', type: 'entity' },
-    { name: 'contentEntity', type: 'entity' },
-    { name: 'horizontalScrollbarEntity', type: 'entity' },
-    { name: 'verticalScrollbarEntity', type: 'entity' }
+    { name: 'verticalScrollbarVisibility', type: 'number' }
 ];
 
 const DEFAULT_DRAG_THRESHOLD = 10;
@@ -29,15 +26,14 @@ const DEFAULT_DRAG_THRESHOLD = 10;
 /**
  * Manages creation of {@link ScrollViewComponent}s.
  *
- * @augments ComponentSystem
  * @category User Interface
  */
 class ScrollViewComponentSystem extends ComponentSystem {
     /**
      * Create a new ScrollViewComponentSystem instance.
      *
-     * @param {import('../../app-base.js').AppBase} app - The application.
-     * @hideconstructor
+     * @param {AppBase} app - The application.
+     * @ignore
      */
     constructor(app) {
         super(app);
@@ -66,6 +62,11 @@ class ScrollViewComponentSystem extends ComponentSystem {
         }
 
         super.initializeComponentData(component, data, _schema);
+
+        component.viewportEntity = data.viewportEntity;
+        component.contentEntity = data.contentEntity;
+        component.horizontalScrollbarEntity = data.horizontalScrollbarEntity;
+        component.verticalScrollbarEntity = data.verticalScrollbarEntity;
     }
 
     onUpdate(dt) {
@@ -91,7 +92,5 @@ class ScrollViewComponentSystem extends ComponentSystem {
         this.app.systems.off('update', this.onUpdate, this);
     }
 }
-
-Component._buildAccessors(ScrollViewComponent.prototype, _schema);
 
 export { ScrollViewComponentSystem };

@@ -1,7 +1,11 @@
 import { math } from './math.js';
 
 /**
- * Representation of an RGBA color.
+ * An RGBA color.
+ *
+ * Each color component is a floating point value in the range 0 to 1. The `r` (red), `g` (green)
+ * and `b` (blue) components define a color in RGB color space. The `a` (alpha) component defines
+ * transparency. An alpha of 1 is fully opaque. An alpha of 0 is fully transparent.
  *
  * @category Math
  */
@@ -49,7 +53,7 @@ class Color {
             this.r = r[0];
             this.g = r[1];
             this.b = r[2];
-            this.a = r[3] !== undefined ? r[3] : 1;
+            this.a = r[3] ?? 1;
         } else {
             this.r = r;
             this.g = g;
@@ -151,6 +155,49 @@ class Color {
     }
 
     /**
+     * Converts the color from gamma to linear color space.
+     *
+     * @param {Color} [src] - The color to convert to linear color space. If not set, the operation
+     * is done in place.
+     * @returns {Color} Self for chaining.
+     */
+    linear(src = this) {
+        this.r = Math.pow(src.r, 2.2);
+        this.g = Math.pow(src.g, 2.2);
+        this.b = Math.pow(src.b, 2.2);
+        this.a = src.a;
+        return this;
+    }
+
+    /**
+     * Converts the color from linear to gamma color space.
+     *
+     * @param {Color} [src] - The color to convert to gamma color space. If not set, the operation is
+     * done in place.
+     * @returns {Color} Self for chaining.
+     */
+    gamma(src = this) {
+        this.r = Math.pow(src.r, 1 / 2.2);
+        this.g = Math.pow(src.g, 1 / 2.2);
+        this.b = Math.pow(src.b, 1 / 2.2);
+        this.a = src.a;
+        return this;
+    }
+
+    /**
+     * Multiplies RGB elements of a Color by a number. Note that the alpha value is left unchanged.
+     *
+     * @param {number} scalar - The number to multiply by.
+     * @returns {Color} Self for chaining.
+     */
+    mulScalar(scalar) {
+        this.r *= scalar;
+        this.g *= scalar;
+        this.b *= scalar;
+        return this;
+    }
+
+    /**
      * Set the values of the color from a string representation '#11223344' or '#112233'.
      *
      * @param {string} hex - A string representation in the format '#RRGGBBAA' or '#RRGGBB'. Where
@@ -174,30 +221,82 @@ class Color {
     }
 
     /**
+     * Set the values of the vector from an array.
+     *
+     * @param {number[]} arr - The array to set the vector values from.
+     * @param {number} [offset] - The zero-based index at which to start copying elements from the
+     * array. Default is 0.
+     * @returns {Color} Self for chaining.
+     * @example
+     * const c = new pc.Color();
+     * c.fromArray([1, 0, 1, 1]);
+     * // c is set to [1, 0, 1, 1]
+     */
+    fromArray(arr, offset = 0) {
+        this.r = arr[offset] ?? this.r;
+        this.g = arr[offset + 1] ?? this.g;
+        this.b = arr[offset + 2] ?? this.b;
+        this.a = arr[offset + 3] ?? this.a;
+
+        return this;
+    }
+
+    /**
      * Converts the color to string form. The format is '#RRGGBBAA', where RR, GG, BB, AA are the
      * red, green, blue and alpha values. When the alpha value is not included (the default), this
      * is the same format as used in HTML/CSS.
      *
      * @param {boolean} alpha - If true, the output string will include the alpha value.
+     * @param {boolean} [asArray] - If true, the output will be an array of numbers. Defaults to false.
      * @returns {string} The color in string form.
      * @example
      * const c = new pc.Color(1, 1, 1);
      * // Outputs #ffffffff
      * console.log(c.toString());
      */
-    toString(alpha) {
-        let s = '#' + ((1 << 24) + (Math.round(this.r * 255) << 16) + (Math.round(this.g * 255) << 8) + Math.round(this.b * 255)).toString(16).slice(1);
-        if (alpha === true) {
-            const a = Math.round(this.a * 255).toString(16);
-            if (this.a < 16 / 255) {
-                s += '0' + a;
-            } else {
-                s += a;
-            }
+    toString(alpha, asArray) {
 
+        const { r, g, b, a } = this;
+
+        // If any component exceeds 1 (HDR), return the color as an array
+        if (asArray || r > 1 || g > 1 || b > 1) {
+            return `${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)}, ${a.toFixed(3)}`;
         }
 
+        let s = `#${((1 << 24) + (Math.round(r * 255) << 16) + (Math.round(g * 255) << 8) + Math.round(b * 255)).toString(16).slice(1)}`;
+        if (alpha === true) {
+            const aa = Math.round(a * 255).toString(16);
+            if (this.a < 16 / 255) {
+                s += `0${aa}`;
+            } else {
+                s += aa;
+            }
+        }
         return s;
+    }
+
+    /**
+     * Converts the color to an array of numbers.
+     *
+     * @param {number[]} [arr] - The array to populate with the color components. If not specified,
+     * a new array is created. Default is true.
+     * @param {number} [offset] - The zero-based index at which to start copying elements to the
+     * array. Default is 0.
+     * @param {boolean} [alpha] - If true, the output array will include the alpha value.
+     * @returns {number[]} The color as an array of numbers.
+     * @example
+     * const c = new pc.Color(1, 1, 1);
+     * // Outputs [1, 1, 1, 1]
+     * console.log(c.toArray());
+     */
+    toArray(arr = [], offset = 0, alpha = true) {
+        arr[offset] = this.r;
+        arr[offset + 1] = this.g;
+        arr[offset + 2] = this.b;
+        if (alpha) {
+            arr[offset + 3] = this.a;
+        }
+        return arr;
     }
 
     /**

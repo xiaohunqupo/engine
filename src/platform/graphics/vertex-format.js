@@ -1,14 +1,16 @@
 import { Debug } from '../../core/debug.js';
 import { hashCode } from '../../core/hash.js';
-
 import { math } from '../../core/math/math.js';
 import { StringIds } from '../../core/string-ids.js';
-
 import {
     SEMANTIC_TEXCOORD0, SEMANTIC_TEXCOORD1, SEMANTIC_ATTR12, SEMANTIC_ATTR13, SEMANTIC_ATTR14, SEMANTIC_ATTR15,
     SEMANTIC_COLOR, SEMANTIC_TANGENT, TYPE_FLOAT32, typedArrayTypesByteSize, vertexTypesNames
 } from './constants.js';
 import { DeviceCache } from './device-cache.js';
+
+/**
+ * @import { GraphicsDevice } from './graphics-device.js'
+ */
 
 const stringIds = new StringIds();
 const webgpuValidElementSizes = [2, 4, 8, 12, 16];
@@ -65,12 +67,8 @@ const deviceCache = new DeviceCache();
  */
 class VertexFormat {
     /**
-     * Create a new VertexFormat instance.
-     *
-     * @param {import('./graphics-device.js').GraphicsDevice} graphicsDevice - The graphics device
-     * used to manage this vertex format.
-     * @param {object[]} description - An array of vertex attribute descriptions.
-     * @param {string} description[].semantic - The meaning of the vertex element. This is used to
+     * @typedef {object} AttributeDescription
+     * @property {string} semantic - The meaning of the vertex element. This is used to
      * link the vertex data to a shader input. Can be:
      *
      * - {@link SEMANTIC_POSITION}
@@ -90,9 +88,9 @@ class VertexFormat {
      *
      * If vertex data has a meaning other that one of those listed above, use the user-defined
      * semantics: {@link SEMANTIC_ATTR0} to {@link SEMANTIC_ATTR15}.
-     * @param {number} description[].components - The number of components of the vertex attribute.
+     * @property {number} components - The number of components of the vertex attribute.
      * Can be 1, 2, 3 or 4.
-     * @param {number} description[].type - The data type of the attribute. Can be:
+     * @property {number} type - The data type of the attribute. Can be:
      *
      * - {@link TYPE_INT8}
      * - {@link TYPE_UINT8}
@@ -103,13 +101,21 @@ class VertexFormat {
      * - {@link TYPE_FLOAT16}
      * - {@link TYPE_FLOAT32}
      *
-     * @param {boolean} [description[].normalize] - If true, vertex attribute data will be mapped
+     * @property {boolean} [normalize] - If true, vertex attribute data will be mapped
      * from a 0 to 255 range down to 0 to 1 when fed to a shader. If false, vertex attribute data
      * is left unchanged. If this property is unspecified, false is assumed. This property is
      * ignored when asInt is true.
-     * @param {boolean} [description[].asInt] - If true, vertex attribute data will be accessible
+     * @property {boolean} [asInt] - If true, vertex attribute data will be accessible
      * as integer numbers in shader code. Defaults to false, which means that vertex attribute data
      * will be accessible as floating point numbers. Can be only used with INT and UINT data types.
+     */
+
+    /**
+     * Create a new VertexFormat instance.
+     *
+     * @param {GraphicsDevice} graphicsDevice - The graphics device used to manage this vertex
+     * format.
+     * @param {AttributeDescription[]} description - An array of vertex attribute descriptions.
      * @param {number} [vertexCount] - When specified, vertex format will be set up for
      * non-interleaved format with a specified number of vertices. (example: PPPPNNNNCCCC), where
      * arrays of individual attributes will be stored one right after the other (subject to
@@ -156,7 +162,7 @@ class VertexFormat {
 
             // WebGPU has limited element size support (for example uint16x3 is not supported)
             Debug.assert(VertexFormat.isElementValid(graphicsDevice, elementDesc),
-                         `WebGPU does not support the format of vertex element ${elementDesc.semantic} : ${vertexTypesNames[elementDesc.type]} x ${elementDesc.components}`);
+                `WebGPU does not support the format of vertex element ${elementDesc.semantic} : ${vertexTypesNames[elementDesc.type]} x ${elementDesc.components}`);
 
             // align up the offset to elementSize (when vertexCount is specified only - case of non-interleaved format)
             if (vertexCount) {
@@ -165,7 +171,7 @@ class VertexFormat {
                 // non-interleaved format with elementSize not multiple of 4 might be slower on some platforms - padding is recommended to align its size
                 // example: use 4 x TYPE_UINT8 instead of 3 x TYPE_UINT8
                 Debug.assert((elementSize % 4) === 0,
-                             `Non-interleaved vertex format with element size not multiple of 4 can have performance impact on some platforms. Element size: ${elementSize}`);
+                    `Non-interleaved vertex format with element size not multiple of 4 can have performance impact on some platforms. Element size: ${elementSize}`);
             }
 
             const asInt = elementDesc.asInt ?? false;
@@ -213,9 +219,8 @@ class VertexFormat {
     /**
      * The {@link VertexFormat} used to store matrices of type {@link Mat4} for hardware instancing.
      *
-     * @param {import('./graphics-device.js').GraphicsDevice} graphicsDevice - The graphics device
-     * used to create this vertex format.
-     *
+     * @param {GraphicsDevice} graphicsDevice - The graphics device used to create this vertex
+     * format.
      * @returns {VertexFormat} The default instancing vertex format.
      */
     static getDefaultInstancingFormat(graphicsDevice) {
@@ -233,8 +238,9 @@ class VertexFormat {
 
     static isElementValid(graphicsDevice, elementDesc) {
         const elementSize = elementDesc.components * typedArrayTypesByteSize[elementDesc.type];
-        if (graphicsDevice.isWebGPU && !webgpuValidElementSizes.includes(elementSize))
+        if (graphicsDevice.isWebGPU && !webgpuValidElementSizes.includes(elementSize)) {
             return false;
+        }
         return true;
     }
 
@@ -245,7 +251,7 @@ class VertexFormat {
      */
     update() {
         // Note that this is used only by vertex attribute morphing on the WebGL.
-        Debug.assert(!this.device.isWebGPU, `VertexFormat#update is not supported on WebGPU and VertexFormat cannot be modified.`);
+        Debug.assert(!this.device.isWebGPU, 'VertexFormat#update is not supported on WebGPU and VertexFormat cannot be modified.');
         this._evaluateHash();
     }
 

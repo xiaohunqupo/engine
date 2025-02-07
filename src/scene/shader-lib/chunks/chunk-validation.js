@@ -1,4 +1,7 @@
-import { CHUNKAPI_1_51, CHUNKAPI_1_55, CHUNKAPI_1_56, CHUNKAPI_1_57, CHUNKAPI_1_60, CHUNKAPI_1_62, CHUNKAPI_1_65 } from '../../../platform/graphics/constants.js';
+import {
+    CHUNKAPI_1_51, CHUNKAPI_1_55, CHUNKAPI_1_56, CHUNKAPI_1_57, CHUNKAPI_1_60, CHUNKAPI_1_62, CHUNKAPI_1_65,
+    CHUNKAPI_1_70, CHUNKAPI_2_1, CHUNKAPI_2_3, CHUNKAPI_2_5
+} from '../../../platform/graphics/constants.js';
 import { Debug } from '../../../core/debug.js';
 import { shaderChunks } from './chunks.js';
 
@@ -47,7 +50,6 @@ const chunkVersions = {
     lightSheenPS: CHUNKAPI_1_62,
     lightSpecularAnisoGGXPS: CHUNKAPI_1_62,
     lightSpecularBlinnPS: CHUNKAPI_1_62,
-    lightSpecularPhongPS: CHUNKAPI_1_62,
     ltcPS: CHUNKAPI_1_62,
     reflDirPS: CHUNKAPI_1_62,
     reflDirAnisoPS: CHUNKAPI_1_62,
@@ -64,12 +66,10 @@ const chunkVersions = {
     shadowEVSMnPS: CHUNKAPI_1_62,
     shadowStandardPS: CHUNKAPI_1_62,
     shadowStandardGL2PS: CHUNKAPI_1_62,
-    shadowVSM8PS: CHUNKAPI_1_62,
     spotPS: CHUNKAPI_1_62,
     TBNPS: CHUNKAPI_1_62,
     TBNObjectSpacePS: CHUNKAPI_1_62,
     TBNderivativePS: CHUNKAPI_1_62,
-    TBNfastPS: CHUNKAPI_1_62,
 
     endPS: CHUNKAPI_1_65,
     metalnessModulatePS: CHUNKAPI_1_65,
@@ -79,8 +79,8 @@ const chunkVersions = {
     iridescenceDiffractionPS: CHUNKAPI_1_65,
     lightmapAddPS: CHUNKAPI_1_65,
     lightmapDirAddPS: CHUNKAPI_1_65,
-    refractionCubePS: CHUNKAPI_1_65,
-    refractionDynamicPS: CHUNKAPI_1_65
+    refractionCubePS: CHUNKAPI_1_70,
+    refractionDynamicPS: CHUNKAPI_1_70
 };
 
 // removed
@@ -100,12 +100,20 @@ const removedChunks = {
     combineDiffuseSpecularNoReflPS: CHUNKAPI_1_56,
     combineDiffuseSpecularNoReflSeparateAmbientPS: CHUNKAPI_1_56,
     combineDiffuseSpecularOldPS: CHUNKAPI_1_56,
-    combineDiffuseSpecularNoConservePS: CHUNKAPI_1_55,
     lightmapSingleVertPS: CHUNKAPI_1_55,
     normalMapFastPS: CHUNKAPI_1_55,
     specularAaNonePS: CHUNKAPI_1_55,
     specularAaToksvigPS: CHUNKAPI_1_55,
-    specularAaToksvigFastPS: CHUNKAPI_1_55
+    specularAaToksvigFastPS: CHUNKAPI_1_55,
+    skyboxEnvPS: CHUNKAPI_2_1,
+    skyboxHDRPS: CHUNKAPI_2_1,
+    shadowVSM8PS: CHUNKAPI_2_3,
+    fogExpPS: CHUNKAPI_2_5,
+    fogExp2PS: CHUNKAPI_2_5,
+    fogLinearPS: CHUNKAPI_2_5,
+    fogNonePS: CHUNKAPI_2_5,
+    gamma1_0PS: CHUNKAPI_2_5,
+    gamma2_2PS: CHUNKAPI_2_5
 };
 
 // compare two "major.minor" semantic version strings and return true if a is a smaller version than b.

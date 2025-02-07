@@ -1,7 +1,11 @@
-import { Vec3 } from "../../core/math/vec3.js";
-import { SKYTYPE_INFINITE } from "../constants.js";
-import { GraphNode } from "../graph-node.js";
-import { SkyMesh } from "./sky-mesh.js";
+import { Vec3 } from '../../core/math/vec3.js';
+import { SKYTYPE_INFINITE } from '../constants.js';
+import { GraphNode } from '../graph-node.js';
+import { SkyMesh } from './sky-mesh.js';
+
+/**
+ * @import { Scene } from '../scene.js'
+ */
 
 /**
  * Implementation of the sky.
@@ -45,8 +49,8 @@ class Sky {
     /**
      * Constructs a new sky.
      *
-     * @param {import('../scene.js').Scene} scene - The scene owning the sky.
-     * @hideconstructor
+     * @param {Scene} scene - The scene owning the sky.
+     * @ignore
      */
     constructor(scene) {
         this.device = scene.device;
@@ -58,7 +62,6 @@ class Sky {
         this.centerArray = new Float32Array(3);
         this.projectedSkydomeCenterId = this.device.scope.resolve('projectedSkydomeCenter');
     }
-
 
     applySettings(render) {
         this.type = render.skyType ?? SKYTYPE_INFINITE;
@@ -74,9 +77,9 @@ class Sky {
      * The type of the sky. One of the SKYMESH_* constants. Defaults to {@link SKYTYPE_INFINITE}.
      * Can be:
      *
-     * {@link SKYTYPE_INFINITE}
-     * {@link SKYTYPE_BOX}
-     * {@link SKYTYPE_DOME}
+     * - {@link SKYTYPE_INFINITE}
+     * - {@link SKYTYPE_BOX}
+     * - {@link SKYTYPE_DOME}
      *
      * @type {string}
      */

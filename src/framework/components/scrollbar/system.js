@@ -1,29 +1,29 @@
-import { Component } from '../component.js';
 import { ComponentSystem } from '../system.js';
-
 import { ScrollbarComponent } from './component.js';
 import { ScrollbarComponentData } from './data.js';
+
+/**
+ * @import { AppBase } from '../../app-base.js'
+ */
 
 const _schema = [
     { name: 'enabled', type: 'boolean' },
     { name: 'orientation', type: 'number' },
     { name: 'value', type: 'number' },
-    { name: 'handleSize', type: 'number' },
-    { name: 'handleEntity', type: 'entity' }
+    { name: 'handleSize', type: 'number' }
 ];
 
 /**
  * Manages creation of {@link ScrollbarComponent}s.
  *
- * @augments ComponentSystem
  * @category User Interface
  */
 class ScrollbarComponentSystem extends ComponentSystem {
     /**
      * Create a new ScrollbarComponentSystem.
      *
-     * @param {import('../../app-base.js').AppBase} app - The application.
-     * @hideconstructor
+     * @param {AppBase} app - The application.
+     * @ignore
      */
     constructor(app) {
         super(app);
@@ -35,18 +35,22 @@ class ScrollbarComponentSystem extends ComponentSystem {
 
         this.schema = _schema;
 
+        this.on('add', this._onAddComponent, this);
         this.on('beforeremove', this._onRemoveComponent, this);
     }
 
     initializeComponentData(component, data, properties) {
         super.initializeComponentData(component, data, _schema);
+        component.handleEntity = data.handleEntity;
+    }
+
+    _onAddComponent(entity) {
+        entity.fire('scrollbar:add');
     }
 
     _onRemoveComponent(entity, component) {
         component.onRemove();
     }
 }
-
-Component._buildAccessors(ScrollbarComponent.prototype, _schema);
 
 export { ScrollbarComponentSystem };

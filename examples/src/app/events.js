@@ -1,37 +1,34 @@
+/** @typedef {import('./constants.mjs').DEVICETYPE_WEBGPU} DEVICETYPE_WEBGPU  */
+/** @typedef {import('./constants.mjs').DEVICETYPE_WEBGL2} DEVICETYPE_WEBGL2  */
+/** @typedef {import('./constants.mjs').DEVICETYPE_NULL} DEVICETYPE_NULL  */
+
 /**
- * @typedef {object} Loading
- * @property {object} detail - The detail object.
- * @property {boolean} detail.showDeviceSelector - Show device selector.
+ * @typedef {object} LoadingEventDetail
+ * @property {boolean} showDeviceSelector - Show device selector
  *
- * @typedef {Event & Loading} LoadingEvent
+ * @typedef {CustomEvent<LoadingEventDetail>} LoadingEvent.
  */
 
 /**
- * @typedef {object} Load
+ * @typedef {object} StateEventDetail
+ * @property {import('@playcanvas/observer').Observer} observer - The PCUI observer.
  * @property {Record<string, string>} files - The example files.
- * @property {string} description - The example description..
+ * @property {string} description - The example description.
  *
- * @typedef {Event & Load} LoadEvent
+ * @typedef {CustomEvent<StateEventDetail>} StateEvent
  */
 
 /**
- * @typedef {object} UpdateFiles
- * @property {object} detail - The detail object.
- * @property {Record<string, string>} detail.files - The example files
+ * @typedef {object} DeviceEventDetail
+ * @property {DEVICETYPE_WEBGPU | DEVICETYPE_WEBGL2 | DEVICETYPE_NULL} deviceType - The device type.
  *
- * @typedef {Event & UpdateFiles} UpdateFilesEvent
+ * @typedef {CustomEvent<DeviceEventDetail>} DeviceEvent
  */
 
 /**
- * @typedef {object} HandleFiles
- * @property {Record<string, string>} detail - The example files object.
+ * @typedef {object} ErrorEventDetail
+ * @property {string} message - The error message.
+ * @property {{ file: string, line: string, column: string }[]} locations - The error locations.
  *
- * @typedef {Event & HandleFiles} HandleFilesEvent
- */
-
-/**
- * @typedef {object} UpdateActiveDevice
- * @property {string} detail - The detail object.
- *
- * @typedef {Event & UpdateActiveDevice} UpdateActiveDeviceEvent
+ * @typedef {CustomEvent<ErrorEventDetail>} ErrorEvent
  */

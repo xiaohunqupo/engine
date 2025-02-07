@@ -3,6 +3,10 @@ import { EventHandler } from '../../core/event-handler.js';
 import { XrPlane } from './xr-plane.js';
 
 /**
+ * @import { XrManager } from './xr-manager.js'
+ */
+
+/**
  * Plane Detection provides the ability to detect real world surfaces based on estimations of the
  * underlying AR system.
  *
@@ -69,7 +73,7 @@ class XrPlaneDetection extends EventHandler {
     static EVENT_REMOVE = 'remove';
 
     /**
-     * @type {import('./xr-manager.js').XrManager}
+     * @type {XrManager}
      * @private
      */
     _manager;
@@ -101,8 +105,8 @@ class XrPlaneDetection extends EventHandler {
     /**
      * Create a new XrPlaneDetection instance.
      *
-     * @param {import('./xr-manager.js').XrManager} manager - WebXR Manager.
-     * @hideconstructor
+     * @param {XrManager} manager - WebXR Manager.
+     * @ignore
      */
     constructor(manager) {
         super();
@@ -117,10 +121,12 @@ class XrPlaneDetection extends EventHandler {
 
     /** @private */
     _onSessionStart() {
-        const available = this._supported && this._manager.session.enabledFeatures.indexOf('plane-detection') !== -1;
-        if (available) {
-            this._available = true;
-            this.fire('available');
+        if (this._manager.session.enabledFeatures) {
+            const available = this._manager.session.enabledFeatures.indexOf('plane-detection') !== -1;
+            if (available) {
+                this._available = true;
+                this.fire('available');
+            }
         }
     }
 
@@ -141,19 +147,26 @@ class XrPlaneDetection extends EventHandler {
     }
 
     /**
-     * @param {*} frame - XRFrame from requestAnimationFrame callback.
+     * @param {XRFrame} frame - XRFrame from requestAnimationFrame callback.
      * @ignore
      */
     update(frame) {
-        if (!this._supported || !this._available)
-            return;
+        if (!this._available) {
+            if (!this._manager.session.enabledFeatures && frame.detectedPlanes.size) {
+                this._available = true;
+                this.fire('available');
+            } else {
+                return;
+            }
+        }
 
         const detectedPlanes = frame.detectedPlanes;
 
         // iterate through indexed planes
         for (const [xrPlane, plane] of this._planesIndex) {
-            if (detectedPlanes.has(xrPlane))
+            if (detectedPlanes.has(xrPlane)) {
                 continue;
+            }
 
             // if indexed plane is not listed in detectedPlanes anymore
             // then remove it

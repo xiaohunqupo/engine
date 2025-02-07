@@ -1,10 +1,11 @@
 import { ShaderProcessorOptions } from '../../platform/graphics/shader-processor-options.js';
-import { DITHER_NONE, FRESNEL_SCHLICK, SPECOCC_AO, SPECULAR_BLINN } from "../constants.js";
+import { DITHER_NONE, FRESNEL_SCHLICK, SPECOCC_AO } from '../constants.js';
 import { Material } from './material.js';
 import { LitMaterialOptions } from './lit-material-options.js';
 import { LitMaterialOptionsBuilder } from './lit-material-options-builder.js';
-import { getProgramLibrary } from "../shader-lib/get-program-library.js";
+import { getProgramLibrary } from '../shader-lib/get-program-library.js';
 import { lit } from '../shader-lib/programs/lit.js';
+import { getCoreDefines } from '../shader-lib/utils.js';
 
 const options = new LitMaterialOptions();
 
@@ -23,25 +24,19 @@ class LitMaterial extends Material {
 
     shaderChunk = 'void evaluateFrontend() {}\n';
 
-    chunks = null;
-
     useLighting = true;
 
     useFog = true;
 
-    useGammaTonemap = true;
+    useTonemap = true;
 
     useSkybox = true;
-
-    shadingModel = SPECULAR_BLINN;
 
     ambientSH = null;
 
     pixelSnap = false;
 
     nineSlicedMode = null;
-
-    fastTbn = false;
 
     twoSidedLighting = false;
 
@@ -56,8 +51,6 @@ class LitMaterial extends Material {
     opacityDither = DITHER_NONE;
 
     opacityShadowDither = DITHER_NONE;
-
-    conserveEnergy = true;
 
     ggxSpecular = false;
 
@@ -90,13 +83,15 @@ class LitMaterial extends Material {
 
     hasClearCoatNormals = false;
 
-    getShaderVariant(device, scene, objDefs, unused, pass, sortedLights, viewUniformFormat, viewBindGroupFormat, vertexFormat) {
+    getShaderVariant(params) {
+
         options.usedUvs = this.usedUvs.slice();
         options.shaderChunk = this.shaderChunk;
+        options.defines = getCoreDefines(this, params);
 
-        LitMaterialOptionsBuilder.update(options.litOptions, this, scene, objDefs, pass, sortedLights);
-        const processingOptions = new ShaderProcessorOptions(viewUniformFormat, viewBindGroupFormat, vertexFormat);
-        const library = getProgramLibrary(device);
+        LitMaterialOptionsBuilder.update(options.litOptions, this, params.scene, params.cameraShaderParams, params.objDefs, params.pass, params.sortedLights);
+        const processingOptions = new ShaderProcessorOptions(params.viewUniformFormat, params.viewBindGroupFormat, params.vertexFormat);
+        const library = getProgramLibrary(params.device);
         library.register('lit', lit);
         const shader = library.getProgram('lit', options, processingOptions, this.userId);
         return shader;

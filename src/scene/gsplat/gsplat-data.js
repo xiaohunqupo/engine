@@ -2,154 +2,136 @@ import { Color } from '../../core/math/color.js';
 import { Mat4 } from '../../core/math/mat4.js';
 import { Quat } from '../../core/math/quat.js';
 import { Vec3 } from '../../core/math/vec3.js';
-import { Vec4 } from '../../core/math/vec4.js';
 import { BoundingBox } from '../../core/shape/bounding-box.js';
 
-const vec3 = new Vec3();
+/**
+ * @import { PlyElement } from '../../framework/parsers/ply.js'
+ * @import { Scene } from '../scene.js'
+ * @import { Vec4 } from '../../core/math/vec4.js'
+ */
+
 const mat4 = new Mat4();
 const quat = new Quat();
-const quat2 = new Quat();
 const aabb = new BoundingBox();
 const aabb2 = new BoundingBox();
 
-const debugPoints = [new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3()];
-const debugLines = [
-    debugPoints[0], debugPoints[1], debugPoints[1], debugPoints[3], debugPoints[3], debugPoints[2], debugPoints[2], debugPoints[0],
-    debugPoints[4], debugPoints[5], debugPoints[5], debugPoints[7], debugPoints[7], debugPoints[6], debugPoints[6], debugPoints[4],
-    debugPoints[0], debugPoints[4], debugPoints[1], debugPoints[5], debugPoints[2], debugPoints[6], debugPoints[3], debugPoints[7]
-];
 const debugColor = new Color(1, 1, 0, 0.4);
+const SH_C0 = 0.28209479177387814;
+
+// iterator for accessing uncompressed splat data
+class SplatIterator {
+    constructor(gsplatData, p, r, s, c) {
+        const x = gsplatData.getProp('x');
+        const y = gsplatData.getProp('y');
+        const z = gsplatData.getProp('z');
+
+        const rx = gsplatData.getProp('rot_1');
+        const ry = gsplatData.getProp('rot_2');
+        const rz = gsplatData.getProp('rot_3');
+        const rw = gsplatData.getProp('rot_0');
+
+        const sx = gsplatData.getProp('scale_0');
+        const sy = gsplatData.getProp('scale_1');
+        const sz = gsplatData.getProp('scale_2');
+
+        const cr = gsplatData.getProp('f_dc_0');
+        const cg = gsplatData.getProp('f_dc_1');
+        const cb = gsplatData.getProp('f_dc_2');
+        const ca = gsplatData.getProp('opacity');
+
+        /**
+         * Calculates the sigmoid of a given value.
+         *
+         * @param {number} v - The value for which to compute the sigmoid function.
+         * @returns {number} The result of the sigmoid function.
+         */
+        const sigmoid = (v) => {
+            if (v > 0) {
+                return 1 / (1 + Math.exp(-v));
+            }
+
+            const t = Math.exp(v);
+            return t / (1 + t);
+        };
+
+        this.read = (i) => {
+            if (p) {
+                p.x = x[i];
+                p.y = y[i];
+                p.z = z[i];
+            }
+
+            if (r) {
+                r.set(rx[i], ry[i], rz[i], rw[i]);
+            }
+
+            if (s) {
+                s.set(Math.exp(sx[i]), Math.exp(sy[i]), Math.exp(sz[i]));
+            }
+
+            if (c) {
+                c.set(
+                    0.5 + cr[i] * SH_C0,
+                    0.5 + cg[i] * SH_C0,
+                    0.5 + cb[i] * SH_C0,
+                    sigmoid(ca[i])
+                );
+            }
+        };
+    }
+}
 
 /**
- * Defines the shape of a SplatTRS.
- * @typedef {object} SplatTRS - Represents a splat object with position, rotation, and scale.
- * @property {number} x - The x-coordinate of the position.
- * @property {number} y - The y-coordinate of the position.
- * @property {number} z - The z-coordinate of the position.
- * @property {number} rx - The x-component of the quaternion rotation.
- * @property {number} ry - The y-component of the quaternion rotation.
- * @property {number} rz - The z-component of the quaternion rotation.
- * @property {number} rw - The w-component of the quaternion rotation.
- * @property {number} sx - The scale factor in the x-direction.
- * @property {number} sy - The scale factor in the y-direction.
- * @property {number} sz - The scale factor in the z-direction.
- */
-
-/**
+ * Calculate a splat orientation matrix from its position and rotation.
  * @param {Mat4} result - Mat4 instance holding calculated rotation matrix.
- * @param {SplatTRS} data - The splat TRS object.
+ * @param {Vec3} p - The splat position
+ * @param {Quat} r - The splat rotation
  */
-const calcSplatMat = (result, data) => {
-    const px = data.x;
-    const py = data.y;
-    const pz = data.z;
-    const d = Math.sqrt(data.rx * data.rx + data.ry * data.ry + data.rz * data.rz + data.rw * data.rw);
-    const x = data.rx / d;
-    const y = data.ry / d;
-    const z = data.rz / d;
-    const w = data.rw / d;
-
-    // build rotation matrix
-    result.data.set([
-        1.0 - 2.0 * (z * z + w * w),
-        2.0 * (y * z + x * w),
-        2.0 * (y * w - x * z),
-        0,
-
-        2.0 * (y * z - x * w),
-        1.0 - 2.0 * (y * y + w * w),
-        2.0 * (z * w + x * y),
-        0,
-
-        2.0 * (y * w + x * z),
-        2.0 * (z * w - x * y),
-        1.0 - 2.0 * (y * y + z * z),
-        0,
-
-        px, py, pz, 1
-    ]);
+const calcSplatMat = (result, p, r) => {
+    quat.set(r.x, r.y, r.z, r.w).normalize();
+    result.setTRS(p, quat, Vec3.ONE);
 };
 
 class GSplatData {
-    // /** @type {import('./ply-reader').PlyElement[]} */
+    /** @type {PlyElement[]} */
     elements;
 
-    // /** @type {import('./ply-reader').PlyElement} */
-    vertexElement;
+    numSplats;
 
-    // /**
-    //  * @param {import('./ply-reader').PlyElement[]} elements - The elements.
-    //  * @param {boolean} [performZScale] - Whether to perform z scaling.
-    //  */
-    constructor(elements, performZScale = true) {
+    /**
+     * @param {PlyElement[]} elements - The elements.
+     */
+    constructor(elements) {
         this.elements = elements;
-        this.vertexElement = elements.find(element => element.name === 'vertex');
-
-        if (!this.isCompressed && performZScale) {
-            mat4.setScale(-1, -1, 1);
-            this.transform(mat4);
-        }
-    }
-
-    get numSplats() {
-        return this.vertexElement.count;
+        this.numSplats = this.getElement('vertex').count;
     }
 
     /**
      * @param {BoundingBox} result - Bounding box instance holding calculated result.
-     * @param {SplatTRS} data - The splat TRS object.
+     * @param {Vec3} p - The splat position
+     * @param {Quat} r - The splat rotation
+     * @param {Vec3} s - The splat scale
      */
-    static calcSplatAabb(result, data) {
-        calcSplatMat(mat4, data);
+    static calcSplatAabb(result, p, r, s) {
+        calcSplatMat(mat4, p, r);
         aabb.center.set(0, 0, 0);
-        aabb.halfExtents.set(data.sx * 2, data.sy * 2, data.sz * 2);
+        aabb.halfExtents.set(s.x * 2, s.y * 2, s.z * 2);
         result.setFromTransformedAabb(aabb, mat4);
     }
 
-    /**
-     * Transform splat data by the given matrix.
-     *
-     * @param {Mat4} mat - The matrix.
-     */
-    transform(mat) {
-        const x = this.getProp('x');
-        const y = this.getProp('y');
-        const z = this.getProp('z');
-
-        const rx = this.getProp('rot_0');
-        const ry = this.getProp('rot_1');
-        const rz = this.getProp('rot_2');
-        const rw = this.getProp('rot_3');
-
-        quat2.setFromMat4(mat);
-
-        for (let i = 0; i < this.numSplats; ++i) {
-            // transform center
-            vec3.set(x[i], y[i], z[i]);
-            mat.transformPoint(vec3, vec3);
-            x[i] = vec3.x;
-            y[i] = vec3.y;
-            z[i] = vec3.z;
-
-            // transform orientation
-            quat.set(ry[i], rz[i], rw[i], rx[i]).mul2(quat2, quat);
-            rx[i] = quat.w;
-            ry[i] = quat.x;
-            rz[i] = quat.y;
-            rw[i] = quat.z;
-
-            // TODO: transform SH
-        }
+    // access a named property
+    getProp(name, elementName = 'vertex') {
+        return this.getElement(elementName)?.properties.find(p => p.name === name)?.storage;
     }
 
-    // access a named property
-    getProp(name) {
-        return this.vertexElement.properties.find(property => property.name === name && property.storage)?.storage;
+    // access the named element
+    getElement(name) {
+        return this.elements.find(e => e.name === name);
     }
 
     // add a new property
     addProp(name, storage) {
-        this.vertexElement.properties.push({
+        this.getElement('vertex').properties.push({
             type: 'float',
             name,
             storage,
@@ -157,24 +139,89 @@ class GSplatData {
         });
     }
 
-    // calculate scene aabb taking into account splat size
+    /**
+     * Create an iterator for accessing splat data
+     *
+     * @param {Vec3|null} [p] - the vector to receive splat position
+     * @param {Quat|null} [r] - the quaternion to receive splat rotation
+     * @param {Vec3|null} [s] - the vector to receive splat scale
+     * @param {Vec4|null} [c] - the vector to receive splat color
+     * @returns {SplatIterator} - The iterator
+     */
+    createIter(p, r, s, c) {
+        return new SplatIterator(this, p, r, s, c);
+    }
+
+    /**
+     * Calculate pessimistic scene aabb taking into account splat size. This is faster than
+     * calculating an exact aabb.
+     *
+     * @param {BoundingBox} result - Where to store the resulting bounding box.
+     * @param {(i: number) => boolean} [pred] - Optional predicate function to filter splats.
+     * @returns {boolean} - Whether the calculation was successful.
+     */
     calcAabb(result, pred) {
+        let mx, my, mz, Mx, My, Mz;
+        let first = true;
+
         const x = this.getProp('x');
         const y = this.getProp('y');
         const z = this.getProp('z');
-
-        const rx = this.getProp('rot_0');
-        const ry = this.getProp('rot_1');
-        const rz = this.getProp('rot_2');
-        const rw = this.getProp('rot_3');
-
         const sx = this.getProp('scale_0');
         const sy = this.getProp('scale_1');
         const sz = this.getProp('scale_2');
 
-        const splat = {
-            x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, rw: 0, sx: 0, sy: 0, sz: 0
-        };
+        for (let i = 0; i < this.numSplats; ++i) {
+            if (pred && !pred(i)) {
+                continue;
+            }
+
+            const scaleVal = 2.0 * Math.exp(Math.max(sx[i], sy[i], sz[i]));
+
+            const px = x[i];
+            const py = y[i];
+            const pz = z[i];
+
+            if (first) {
+                first = false;
+                mx = px - scaleVal;
+                my = py - scaleVal;
+                mz = pz - scaleVal;
+                Mx = px + scaleVal;
+                My = py + scaleVal;
+                Mz = pz + scaleVal;
+            } else {
+                mx = Math.min(mx, px - scaleVal);
+                my = Math.min(my, py - scaleVal);
+                mz = Math.min(mz, pz - scaleVal);
+                Mx = Math.max(Mx, px + scaleVal);
+                My = Math.max(My, py + scaleVal);
+                Mz = Math.max(Mz, pz + scaleVal);
+            }
+        }
+
+        if (!first) {
+            result.center.set((mx + Mx) * 0.5, (my + My) * 0.5, (mz + Mz) * 0.5);
+            result.halfExtents.set((Mx - mx) * 0.5, (My - my) * 0.5, (Mz - mz) * 0.5);
+        }
+
+        return !first;
+    }
+
+    /**
+     * Calculate exact scene aabb taking into account splat size
+     *
+     * @param {BoundingBox} result - Where to store the resulting bounding box.
+     * @param {(i: number) => boolean} [pred] - Optional predicate function to filter splats.
+     * @returns {boolean} - Whether the calculation was successful.
+     */
+    calcAabbExact(result, pred) {
+
+        const p = new Vec3();
+        const r = new Quat();
+        const s = new Vec3();
+
+        const iter = this.createIter(p, r, s);
 
         let first = true;
 
@@ -183,27 +230,33 @@ class GSplatData {
                 continue;
             }
 
-            splat.x = x[i];
-            splat.y = y[i];
-            splat.z = z[i];
-            splat.rx = rx[i];
-            splat.ry = ry[i];
-            splat.rz = rz[i];
-            splat.rw = rw[i];
-            splat.sx = Math.exp(sx[i]);
-            splat.sy = Math.exp(sy[i]);
-            splat.sz = Math.exp(sz[i]);
+            iter.read(i);
 
             if (first) {
                 first = false;
-                GSplatData.calcSplatAabb(result, splat);
+                GSplatData.calcSplatAabb(result, p, r, s);
             } else {
-                GSplatData.calcSplatAabb(aabb2, splat);
+                GSplatData.calcSplatAabb(aabb2, p, r, s);
                 result.add(aabb2);
             }
         }
 
         return !first;
+    }
+
+    /**
+     * @param {Float32Array} result - Array containing the centers.
+     */
+    getCenters(result) {
+        const x = this.getProp('x');
+        const y = this.getProp('y');
+        const z = this.getProp('z');
+
+        for (let i = 0; i < this.numSplats; ++i) {
+            result[i * 3 + 0] = x[i];
+            result[i * 3 + 1] = y[i];
+            result[i * 3 + 2] = z[i];
+        }
     }
 
     /**
@@ -214,7 +267,6 @@ class GSplatData {
         const x = this.getProp('x');
         const y = this.getProp('y');
         const z = this.getProp('z');
-
         const sx = this.getProp('scale_0');
         const sy = this.getProp('scale_1');
         const sz = this.getProp('scale_2');
@@ -228,6 +280,7 @@ class GSplatData {
             if (pred && !pred(i)) {
                 continue;
             }
+
             const weight = 1.0 / (1.0 + Math.exp(Math.max(sx[i], sy[i], sz[i])));
             result.x += x[i] * weight;
             result.y += y[i] * weight;
@@ -238,175 +291,163 @@ class GSplatData {
     }
 
     /**
-     * @param {import('../scene.js').Scene} scene - The application's scene.
+     * @param {Scene} scene - The application's scene.
      * @param {Mat4} worldMat - The world matrix.
      */
     renderWireframeBounds(scene, worldMat) {
+        const p = new Vec3();
+        const r = new Quat();
+        const s = new Vec3();
+
+        const min = new Vec3();
+        const max = new Vec3();
+
+        const iter = this.createIter(p, r, s);
+
+        for (let i = 0; i < this.numSplats; ++i) {
+            iter.read(i);
+
+            calcSplatMat(mat4, p, r);
+            mat4.mul2(worldMat, mat4);
+
+            min.set(s.x * -2.0, s.y * -2.0, s.z * -2.0);
+            max.set(s.x * 2.0, s.y * 2.0, s.z * 2.0);
+
+            // @ts-ignore
+            scene.immediate.drawWireAlignedBox(min, max, debugColor, true, scene.defaultDrawLayer, mat4);
+        }
+    }
+
+    get isCompressed() {
+        return false;
+    }
+
+    // return the number of spherical harmonic bands present. value will be between 0 and 3 inclusive.
+    get shBands() {
+        const numProps = () => {
+            for (let i = 0; i < 45; ++i) {
+                if (!this.getProp(`f_rest_${i}`)) {
+                    return i;
+                }
+            }
+            return 45;
+        };
+        const sizes = {
+            9: 1,
+            24: 2,
+            45: 3
+        };
+        return sizes[numProps()] ?? 0;
+    }
+
+    calcMortonOrder() {
+        const calcMinMax = (arr) => {
+            let min = arr[0];
+            let max = arr[0];
+            for (let i = 1; i < arr.length; i++) {
+                if (arr[i] < min) min = arr[i];
+                if (arr[i] > max) max = arr[i];
+            }
+            return { min, max };
+        };
+
+        // https://fgiesen.wordpress.com/2009/12/13/decoding-morton-codes/
+        const encodeMorton3 = (x, y, z) => {
+            const Part1By2 = (x) => {
+                x &= 0x000003ff;
+                x = (x ^ (x << 16)) & 0xff0000ff;
+                x = (x ^ (x <<  8)) & 0x0300f00f;
+                x = (x ^ (x <<  4)) & 0x030c30c3;
+                x = (x ^ (x <<  2)) & 0x09249249;
+                return x;
+            };
+
+            return (Part1By2(z) << 2) + (Part1By2(y) << 1) + Part1By2(x);
+        };
+
         const x = this.getProp('x');
         const y = this.getProp('y');
         const z = this.getProp('z');
 
-        const rx = this.getProp('rot_0');
-        const ry = this.getProp('rot_1');
-        const rz = this.getProp('rot_2');
-        const rw = this.getProp('rot_3');
+        const { min: minX, max: maxX } = calcMinMax(x);
+        const { min: minY, max: maxY } = calcMinMax(y);
+        const { min: minZ, max: maxZ } = calcMinMax(z);
 
-        const sx = this.getProp('scale_0');
-        const sy = this.getProp('scale_1');
-        const sz = this.getProp('scale_2');
+        const sizeX = minX === maxX ? 0 : 1024 / (maxX - minX);
+        const sizeY = minY === maxY ? 0 : 1024 / (maxY - minY);
+        const sizeZ = minZ === maxZ ? 0 : 1024 / (maxZ - minZ);
 
-        const splat = {
-            x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, rw: 0, sx: 0, sy: 0, sz: 0
-        };
+        const codes = new Map();
+        for (let i = 0; i < this.numSplats; i++) {
+            const ix = Math.floor((x[i] - minX) * sizeX);
+            const iy = Math.floor((y[i] - minY) * sizeY);
+            const iz = Math.floor((z[i] - minZ) * sizeZ);
+            const code = encodeMorton3(ix, iy, iz);
 
-        for (let i = 0; i < this.numSplats; ++i) {
-            splat.x = x[i];
-            splat.y = y[i];
-            splat.z = z[i];
-            splat.rx = rx[i];
-            splat.ry = ry[i];
-            splat.rz = rz[i];
-            splat.rw = rw[i];
-            splat.sx = Math.exp(sx[i]);
-            splat.sy = Math.exp(sy[i]);
-            splat.sz = Math.exp(sz[i]);
+            const val = codes.get(code);
+            if (val) {
+                val.push(i);
+            } else {
+                codes.set(code, [i]);
+            }
+        }
 
-            calcSplatMat(mat4, splat);
-            mat4.mul2(worldMat, mat4);
+        const keys = Array.from(codes.keys()).sort((a, b) => a - b);
+        const indices = new Uint32Array(this.numSplats);
+        let idx = 0;
 
-            for (let j = 0; j < 8; ++j) {
-                vec3.set(
-                    splat.sx * 2 * ((j & 1) ? 1 : -1),
-                    splat.sy * 2 * ((j & 2) ? 1 : -1),
-                    splat.sz * 2 * ((j & 4) ? 1 : -1)
-                );
-                mat4.transformPoint(vec3, debugPoints[j]);
+        for (let i = 0; i < keys.length; ++i) {
+            const val = codes.get(keys[i]);
+            for (let j = 0; j < val.length; ++j) {
+                indices[idx++] = val[j];
+            }
+        }
+
+        return indices;
+    }
+
+    // reorder the splat data to aid in better gpu memory access at render time
+    reorder(order) {
+        const cache = new Map();
+
+        const getStorage = (size) => {
+            if (cache.has(size)) {
+                const buffer = cache.get(size);
+                cache.delete(size);
+                return buffer;
             }
 
-            scene.drawLineArrays(debugLines, debugColor);
-        }
-    }
+            return new ArrayBuffer(size);
+        };
 
-    // compressed splats
-    get isCompressed() {
-        return this.elements.some(e => e.name === 'chunk') &&
-               ['packed_position', 'packed_rotation', 'packed_scale', 'packed_color'].every(name => this.getProp(name));
-    }
+        const returnStorage = (buffer) => {
+            cache.set(buffer.byteLength, buffer);
+        };
 
-    decompress() {
-        const members = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'scale_0', 'scale_1', 'scale_2'];
-        const chunks = this.elements.find(e => e.name === 'chunk');
-        const vertices = this.vertexElement;
+        const reorder = (data) => {
+            const result = new data.constructor(getStorage(data.byteLength));
 
-        // allocate uncompressed data
-        const data = {};
-        members.forEach((name) => {
-            data[name] = new Float32Array(vertices.count);
+            for (let i = 0; i < order.length; i++) {
+                result[i] = data[order[i]];
+            }
+
+            returnStorage(data.buffer);
+
+            return result;
+        };
+
+        this.elements.forEach((element) => {
+            element.properties.forEach((property) => {
+                if (property.storage) {
+                    property.storage = reorder(property.storage);
+                }
+            });
         });
+    }
 
-        const getChunkProp = (name) => {
-            return chunks.properties.find(p => p.name === name && p.storage)?.storage;
-        };
-
-        const min_x = getChunkProp('min_x');
-        const min_y = getChunkProp('min_y');
-        const min_z = getChunkProp('min_z');
-        const max_x = getChunkProp('max_x');
-        const max_y = getChunkProp('max_y');
-        const max_z = getChunkProp('max_z');
-        const min_scale_x = getChunkProp('min_scale_x');
-        const min_scale_y = getChunkProp('min_scale_y');
-        const min_scale_z = getChunkProp('min_scale_z');
-        const max_scale_x = getChunkProp('max_scale_x');
-        const max_scale_y = getChunkProp('max_scale_y');
-        const max_scale_z = getChunkProp('max_scale_z');
-
-        const position = this.getProp('packed_position');
-        const rotation = this.getProp('packed_rotation');
-        const scale = this.getProp('packed_scale');
-        const color = this.getProp('packed_color');
-
-        const unpackUnorm = (value, bits) => {
-            const t = (1 << bits) - 1;
-            return (value & t) / t;
-        };
-
-        const unpack111011 = (result, value) => {
-            result.x = unpackUnorm(value >>> 21, 11);
-            result.y = unpackUnorm(value >>> 11, 10);
-            result.z = unpackUnorm(value, 11);
-        };
-
-        const unpack8888 = (result, value) => {
-            result.x = unpackUnorm(value >>> 24, 8);
-            result.y = unpackUnorm(value >>> 16, 8);
-            result.z = unpackUnorm(value >>> 8, 8);
-            result.w = unpackUnorm(value, 8);
-        };
-
-        // unpack quaternion with 2,10,10,10 format (largest element, 3x10bit element)
-        const unpackRot = (result, value) => {
-            const norm = 1.0 / (Math.sqrt(2) * 0.5);
-            const a = (unpackUnorm(value >>> 20, 10) - 0.5) * norm;
-            const b = (unpackUnorm(value >>> 10, 10) - 0.5) * norm;
-            const c = (unpackUnorm(value, 10) - 0.5) * norm;
-            const m = Math.sqrt(1.0 - (a * a + b * b + c * c));
-
-            switch (value >>> 30) {
-                case 0: result.set(m, a, b, c); break;
-                case 1: result.set(a, m, b, c); break;
-                case 2: result.set(a, b, m, c); break;
-                case 3: result.set(a, b, c, m); break;
-            }
-        };
-
-        const lerp = (a, b, t) => a * (1 - t) + b * t;
-
-        const p = new Vec3();
-        const r = new Quat();
-        const s = new Vec3();
-        const c = new Vec4();
-
-        for (let i = 0; i < vertices.count; ++i) {
-            const ci = Math.floor(i / 256);
-
-            unpack111011(p, position[i]);
-            unpackRot(r, rotation[i]);
-            unpack111011(s, scale[i]);
-            unpack8888(c, color[i]);
-
-            data.x[i] = lerp(min_x[ci], max_x[ci], p.x);
-            data.y[i] = lerp(min_y[ci], max_y[ci], p.y);
-            data.z[i] = lerp(min_z[ci], max_z[ci], p.z);
-
-            data.rot_0[i] = r.x;
-            data.rot_1[i] = r.y;
-            data.rot_2[i] = r.z;
-            data.rot_3[i] = r.w;
-
-            data.scale_0[i] = lerp(min_scale_x[ci], max_scale_x[ci], s.x);
-            data.scale_1[i] = lerp(min_scale_y[ci], max_scale_y[ci], s.y);
-            data.scale_2[i] = lerp(min_scale_z[ci], max_scale_z[ci], s.z);
-
-            const SH_C0 = 0.28209479177387814;
-            data.f_dc_0[i] = (c.x - 0.5) / SH_C0;
-            data.f_dc_1[i] = (c.y - 0.5) / SH_C0;
-            data.f_dc_2[i] = (c.z - 0.5) / SH_C0;
-            data.opacity[i] = -Math.log(1 / c.w - 1);
-        }
-
-        return new GSplatData([{
-            name: 'vertex',
-            count: vertices.count,
-            properties: members.map((name) => {
-                return {
-                    name: name,
-                    type: 'float',
-                    byteSize: 4,
-                    storage: data[name]
-                };
-            })
-        }], false);
+    // reorder the splat data to aid in better gpu memory access at render time
+    reorderData() {
+        this.reorder(this.calcMortonOrder());
     }
 }
 

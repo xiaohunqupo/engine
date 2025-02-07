@@ -1,24 +1,33 @@
 import { DebugGraphics } from '../../platform/graphics/debug-graphics.js';
 import { BlendState } from '../../platform/graphics/blend-state.js';
 import { RenderPass } from '../../platform/graphics/render-pass.js';
-
 import { SHADER_PICK } from '../../scene/constants.js';
+
+/**
+ * @import { BindGroup } from '../../platform/graphics/bind-group.js'
+ */
 
 const tempMeshInstances = [];
 const lights = [[], [], []];
 
 /**
  * A render pass implementing rendering of mesh instances into a pick buffer.
- *
- * @ignore
  */
 class RenderPassPicker extends RenderPass {
-    // uniform for the mesh index encoded into rgba
-    pickColor = new Float32Array(4);
+    /** @type {BindGroup[]} */
+    viewBindGroups = [];
 
     constructor(device, renderer) {
         super(device);
         this.renderer = renderer;
+    }
+
+    destroy() {
+        this.viewBindGroups.forEach((bg) => {
+            bg.defaultUniformBuffer.destroy();
+            bg.destroy();
+        });
+        this.viewBindGroups.length = 0;
     }
 
     update(camera, scene, layers, mapping) {
@@ -30,15 +39,11 @@ class RenderPassPicker extends RenderPass {
 
     execute() {
         const device = this.device;
-        DebugGraphics.pushGpuMarker(device, 'PICKER');
 
         const { renderer, camera, scene, layers, mapping, renderTarget } = this;
         const srcLayers = scene.layers.layerList;
         const subLayerEnabled = scene.layers.subLayerEnabled;
         const isTransparent = scene.layers.subLayerList;
-
-        const pickColorId = device.scope.resolve('uColor');
-        const pickColor = this.pickColor;
 
         for (let i = 0; i < srcLayers.length; i++) {
             const srcLayer = srcLayers[i];
@@ -79,14 +84,19 @@ class RenderPassPicker extends RenderPass {
 
                     if (tempMeshInstances.length > 0) {
 
+                        // upload clustered lights uniforms
+                        const clusteredLightingEnabled = scene.clusteredLightingEnabled;
+                        if (clusteredLightingEnabled) {
+                            const lightClusters = renderer.worldClustersAllocator.empty;
+                            lightClusters.activate();
+                        }
+
                         renderer.setCameraUniforms(camera.camera, renderTarget);
-                        renderer.renderForward(camera.camera, tempMeshInstances, lights, SHADER_PICK, (meshInstance) => {
-                            const miId = meshInstance.id;
-                            pickColor[0] = ((miId >> 16) & 0xff) / 255;
-                            pickColor[1] = ((miId >> 8) & 0xff) / 255;
-                            pickColor[2] = (miId & 0xff) / 255;
-                            pickColor[3] = ((miId >> 24) & 0xff) / 255;
-                            pickColorId.setValue(pickColor);
+                        if (device.supportsUniformBuffers) {
+                            renderer.setupViewUniformBuffers(this.viewBindGroups, renderer.viewUniformFormat, renderer.viewBindGroupFormat, 1);
+                        }
+
+                        renderer.renderForward(camera.camera, renderTarget, tempMeshInstances, lights, SHADER_PICK, (meshInstance) => {
                             device.setBlendState(BlendState.NOBLEND);
                         });
 
@@ -97,8 +107,6 @@ class RenderPassPicker extends RenderPass {
                 }
             }
         }
-
-        DebugGraphics.popGpuMarker(device);
     }
 }
 

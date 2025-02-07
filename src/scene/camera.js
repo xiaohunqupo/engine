@@ -3,16 +3,20 @@ import { Mat4 } from '../core/math/mat4.js';
 import { Vec3 } from '../core/math/vec3.js';
 import { Vec4 } from '../core/math/vec4.js';
 import { math } from '../core/math/math.js';
-
 import { Frustum } from '../core/shape/frustum.js';
-
 import {
     ASPECT_AUTO, PROJECTION_PERSPECTIVE,
     LAYERID_WORLD, LAYERID_DEPTH, LAYERID_SKYBOX, LAYERID_UI, LAYERID_IMMEDIATE
 } from './constants.js';
 import { RenderPassColorGrab } from './graphics/render-pass-color-grab.js';
 import { RenderPassDepthGrab } from './graphics/render-pass-depth-grab.js';
-import { RenderPassDepth } from './graphics/render-pass-depth.js';
+import { CameraShaderParams } from './camera-shader-params.js';
+
+/**
+ * @import { RenderPass } from '../platform/graphics/render-pass.js'
+ * @import { FogParams } from './fog-params.js'
+ * @import { ShaderPassInfo } from './shader-pass.js'
+ */
 
 // pre-allocated temp variables
 const _deviceCoord = new Vec3();
@@ -28,7 +32,7 @@ const _frustumPoints = [new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3
  */
 class Camera {
     /**
-     * @type {import('./shader-pass.js').ShaderPassInfo|null}
+     * @type {ShaderPassInfo|null}
      */
     shaderPassInfo = null;
 
@@ -38,15 +42,29 @@ class Camera {
     renderPassColorGrab = null;
 
     /**
-     * @type {import('../platform/graphics/render-pass.js').RenderPass|null}
+     * @type {RenderPass|null}
      */
     renderPassDepthGrab = null;
+
+    /**
+     * The fog parameters.
+     *
+     * @type {FogParams|null}
+     */
+    fogParams = null;
+
+    /**
+     * Shader parameters used to generate and use matching shaders.
+     *
+     * @type {CameraShaderParams}
+     */
+    shaderParams = new CameraShaderParams();
 
     /**
      * Render passes used to render this camera. If empty, the camera will render using the default
      * render passes.
      *
-     * @type {import('../platform/graphics/render-pass.js').RenderPass[]}
+     * @type {RenderPass[]}
      */
     renderPasses = [];
 
@@ -92,6 +110,13 @@ class Camera {
         this._viewProjMat = new Mat4();
         this._viewProjMatDirty = true;
 
+        // storage of actual matrices used by the shaders, needed by TAA
+        this._shaderMatricesVersion = 0;
+        this._viewProjInverse = new Mat4();     // inverse view projection matrix from the current frame
+        this._viewProjCurrent = null;           // view projection matrix from the current frame
+        this._viewProjPrevious = new Mat4();    // view projection matrix from the previous frame
+        this._jitters = [0, 0, 0, 0];            // jitter values for TAA, 0-1 - current frame, 2-3 - previous frame
+
         this.frustum = new Frustum();
 
         // Set by XrManager
@@ -114,6 +139,25 @@ class Camera {
         this.renderPassDepthGrab = null;
 
         this.renderPasses.length = 0;
+    }
+
+    /**
+     * Store camera matrices required by TAA. Only update them once per frame.
+     */
+    _storeShaderMatrices(viewProjMat, jitterX, jitterY, renderVersion) {
+        if (this._shaderMatricesVersion !== renderVersion) {
+            this._shaderMatricesVersion = renderVersion;
+
+            this._viewProjPrevious.copy(this._viewProjCurrent ?? viewProjMat);
+            this._viewProjCurrent ??= new Mat4();
+            this._viewProjCurrent.copy(viewProjMat);
+            this._viewProjInverse.invert(viewProjMat);
+
+            this._jitters[2] = this._jitters[0];
+            this._jitters[3] = this._jitters[1];
+            this._jitters[0] = jitterX;
+            this._jitters[1] = jitterY;
+        }
     }
 
     /**
@@ -471,9 +515,7 @@ class Camera {
     _enableRenderPassDepthGrab(device, renderer, enable) {
         if (enable) {
             if (!this.renderPassDepthGrab) {
-                this.renderPassDepthGrab = device.isWebGL1 ?
-                    new RenderPassDepth(device, renderer, this) :
-                    new RenderPassDepthGrab(device, this);
+                this.renderPassDepthGrab = new RenderPassDepthGrab(device, this);
             }
         } else {
             this.renderPassDepthGrab?.destroy();
@@ -559,7 +601,7 @@ class Camera {
             this._updateViewProjMat();
             _invViewProjMat.copy(this._viewProjMat).invert();
 
-                // Transform to world space
+            // Transform to world space
             _invViewProjMat.transformPoint(_deviceCoord, worldCoord);
         }
 
@@ -634,8 +676,20 @@ class Camera {
     getFrustumCorners(near = this.nearClip, far = this.farClip) {
 
         const fov = this.fov * Math.PI / 180.0;
-        let y = this._projection === PROJECTION_PERSPECTIVE ? Math.tan(fov / 2.0) * near : this._orthoHeight;
-        let x = y * this.aspectRatio;
+        let x, y;
+
+        if (this.projection === PROJECTION_PERSPECTIVE) {
+            if (this.horizontalFov) {
+                x = near * Math.tan(fov / 2.0);
+                y = x / this.aspectRatio;
+            } else {
+                y = near * Math.tan(fov / 2.0);
+                x = y * this.aspectRatio;
+            }
+        } else {
+            y = this._orthoHeight;
+            x = y * this.aspectRatio;
+        }
 
         const points = _frustumPoints;
         points[0].x = x;
@@ -652,8 +706,13 @@ class Camera {
         points[3].z = -near;
 
         if (this._projection === PROJECTION_PERSPECTIVE) {
-            y = Math.tan(fov / 2.0) * far;
-            x = y * this.aspectRatio;
+            if (this.horizontalFov) {
+                x = far * Math.tan(fov / 2.0);
+                y = x / this.aspectRatio;
+            } else {
+                y = far * Math.tan(fov / 2.0);
+                x = y * this.aspectRatio;
+            }
         }
         points[4].x = x;
         points[4].y = -y;

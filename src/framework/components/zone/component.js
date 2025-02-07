@@ -1,6 +1,10 @@
 import { Vec3 } from '../../../core/math/vec3.js';
-
 import { Component } from '../component.js';
+
+/**
+ * @import { Entity } from '../../entity.js'
+ * @import { ZoneComponentSystem } from './system.js'
+ */
 
 /**
  * The ZoneComponent allows you to define an area in world space of certain size. This can be used
@@ -9,7 +13,6 @@ import { Component } from '../component.js';
  * performance reasons. And many other possible options. Zones are building blocks and meant to be
  * used in many different ways.
  *
- * @augments Component
  * @ignore
  */
 class ZoneComponent extends Component {
@@ -63,10 +66,8 @@ class ZoneComponent extends Component {
     /**
      * Create a new ZoneComponent instance.
      *
-     * @param {import('./system.js').ZoneComponentSystem} system - The ComponentSystem that
-     * created this Component.
-     * @param {import('../../entity.js').Entity} entity - The Entity that this Component is
-     * attached to.
+     * @param {ZoneComponentSystem} system - The ComponentSystem that created this Component.
+     * @param {Entity} entity - The Entity that this Component is attached to.
      */
     constructor(system, entity) {
         super(system, entity);
@@ -107,8 +108,9 @@ class ZoneComponent extends Component {
 
     _checkState() {
         const state = this.enabled && this.entity.enabled;
-        if (state === this._oldState)
+        if (state === this._oldState) {
             return;
+        }
 
         this._oldState = state;
 

@@ -1,11 +1,23 @@
-import { Debug, DebugHelper } from "../../../core/debug.js";
-import { hash32Fnv1a } from "../../../core/hash.js";
-import { array } from "../../../core/array-utils.js";
-import { TRACEID_RENDERPIPELINE_ALLOC } from "../../../core/constants.js";
+import { Debug, DebugHelper } from '../../../core/debug.js';
+import { hash32Fnv1a } from '../../../core/hash.js';
+import { array } from '../../../core/array-utils.js';
+import { TRACEID_RENDERPIPELINE_ALLOC } from '../../../core/constants.js';
+import { WebgpuVertexBufferLayout } from './webgpu-vertex-buffer-layout.js';
+import { WebgpuDebug } from './webgpu-debug.js';
+import { WebgpuPipeline } from './webgpu-pipeline.js';
+import { DebugGraphics } from '../debug-graphics.js';
+import { bindGroupNames } from '../constants.js';
 
-import { WebgpuVertexBufferLayout } from "./webgpu-vertex-buffer-layout.js";
-import { WebgpuDebug } from "./webgpu-debug.js";
-import { WebgpuPipeline } from "./webgpu-pipeline.js";
+/**
+ * @import { BindGroupFormat } from '../bind-group-format.js'
+ * @import { BlendState } from '../blend-state.js'
+ * @import { DepthState } from '../depth-state.js'
+ * @import { RenderTarget } from '../render-target.js'
+ * @import { Shader } from '../shader.js'
+ * @import { StencilParameters } from '../stencil-parameters.js'
+ * @import { VertexFormat } from '../vertex-format.js'
+ * @import { WebgpuShader } from './webgpu-shader.js'
+ */
 
 let _pipelineId = 0;
 
@@ -71,7 +83,6 @@ const _stencilOps = [
     'invert'                // STENCILOP_INVERT
 ];
 
-/** @ignore */
 class CacheEntry {
     /**
      * Render pipeline
@@ -89,9 +100,6 @@ class CacheEntry {
     hashes;
 }
 
-/**
- * @ignore
- */
 class WebgpuRenderPipeline extends WebgpuPipeline {
     lookupHashes = new Uint32Array(13);
 
@@ -113,11 +121,32 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
         this.cache = new Map();
     }
 
-    /** @private */
+    /**
+     * @param {object} primitive - The primitive.
+     * @param {VertexFormat} vertexFormat0 - The first vertex format.
+     * @param {VertexFormat} vertexFormat1 - The second vertex format.
+     * @param {Shader} shader - The shader.
+     * @param {RenderTarget} renderTarget - The render target.
+     * @param {BindGroupFormat[]} bindGroupFormats - An array of bind group formats.
+     * @param {BlendState} blendState - The blend state.
+     * @param {DepthState} depthState - The depth state.
+     * @param {number} cullMode - The cull mode.
+     * @param {boolean} stencilEnabled - Whether stencil is enabled.
+     * @param {StencilParameters} stencilFront - The stencil state for front faces.
+     * @param {StencilParameters} stencilBack - The stencil state for back faces.
+     * @returns {GPURenderPipeline} Returns the render pipeline.
+     * @private
+     */
     get(primitive, vertexFormat0, vertexFormat1, shader, renderTarget, bindGroupFormats, blendState,
         depthState, cullMode, stencilEnabled, stencilFront, stencilBack) {
 
         Debug.assert(bindGroupFormats.length <= 3);
+
+        // all bind groups must be set as the WebGPU layout cannot have skipped indices. Not having a bind
+        // group would assign incorrect slots to the following bind groups, causing a validation errors.
+        Debug.assert(bindGroupFormats[0], `BindGroup with index 0 [${bindGroupNames[0]}] is not set.`);
+        Debug.assert(bindGroupFormats[1], `BindGroup with index 1 [${bindGroupNames[1]}] is not set.`);
+        Debug.assert(bindGroupFormats[2], `BindGroup with index 2 [${bindGroupNames[2]}] is not set.`);
 
         // render pipeline unique hash
         const lookupHashes = this.lookupHashes;
@@ -151,7 +180,7 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
 
         // no match or a hash collision, so create a new pipeline
         const primitiveTopology = _primitiveTopology[primitive.type];
-        Debug.assert(primitiveTopology, `Unsupported primitive topology`, primitive);
+        Debug.assert(primitiveTopology, 'Unsupported primitive topology', primitive);
 
         // pipeline layout
         const pipelineLayout = this.getPipelineLayout(bindGroupFormats);
@@ -163,7 +192,7 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
         const cacheEntry = new CacheEntry();
         cacheEntry.hashes = new Uint32Array(lookupHashes);
         cacheEntry.pipeline = this.create(primitiveTopology, shader, renderTarget, pipelineLayout, blendState,
-                                          depthState, vertexBufferLayout, cullMode, stencilEnabled, stencilFront, stencilBack);
+            depthState, vertexBufferLayout, cullMode, stencilEnabled, stencilFront, stencilBack);
 
         // add to cache
         if (cacheEntries) {
@@ -207,7 +236,15 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
         return blend;
     }
 
-    /** @private */
+    /**
+     * @param {DepthState} depthState - The depth state.
+     * @param {RenderTarget} renderTarget - The render target.
+     * @param {boolean} stencilEnabled - Whether stencil is enabled.
+     * @param {StencilParameters} stencilFront - The stencil state for front faces.
+     * @param {StencilParameters} stencilBack - The stencil state for back faces.
+     * @returns {object} Returns the depth stencil state.
+     * @private
+     */
     getDepthStencil(depthState, renderTarget, stencilEnabled, stencilFront, stencilBack) {
 
         /** @type {GPUDepthStencilState} */
@@ -217,7 +254,7 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
 
             // format of depth-stencil attachment
             depthStencil = {
-                format: renderTarget.impl.depthFormat
+                format: renderTarget.impl.depthAttachment.format
             };
 
             // depth
@@ -263,11 +300,11 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
 
         const wgpu = this.device.wgpu;
 
-        /** @type {import('./webgpu-shader.js').WebgpuShader} */
+        /** @type {WebgpuShader} */
         const webgpuShader = shader.impl;
 
         /** @type {GPURenderPipelineDescriptor} */
-        const descr = {
+        const desc = {
             vertex: {
                 module: webgpuShader.getVertexShaderModule(),
                 entryPoint: webgpuShader.vertexEntryPoint,
@@ -290,14 +327,14 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
             layout: pipelineLayout
         };
 
+        desc.fragment = {
+            module: webgpuShader.getFragmentShaderModule(),
+            entryPoint: webgpuShader.fragmentEntryPoint,
+            targets: []
+        };
+
         const colorAttachments = renderTarget.impl.colorAttachments;
         if (colorAttachments.length > 0) {
-
-            descr.fragment = {
-                module: webgpuShader.getFragmentShaderModule(),
-                entryPoint: webgpuShader.fragmentEntryPoint,
-                targets: []
-            };
 
             // the same write mask is used by all color buffers, to match the WebGL behavior
             let writeMask = 0;
@@ -310,7 +347,7 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
             const blend = this.getBlend(blendState);
 
             colorAttachments.forEach((attachment) => {
-                descr.fragment.targets.push({
+                desc.fragment.targets.push({
                     format: attachment.format,
                     writeMask: writeMask,
                     blend: blend
@@ -321,16 +358,16 @@ class WebgpuRenderPipeline extends WebgpuPipeline {
         WebgpuDebug.validate(this.device);
 
         _pipelineId++;
-        DebugHelper.setLabel(descr, `RenderPipelineDescr-${_pipelineId}`);
+        DebugHelper.setLabel(desc, `RenderPipelineDescr-${_pipelineId}`);
 
-        const pipeline = wgpu.createRenderPipeline(descr);
+        const pipeline = wgpu.createRenderPipeline(desc);
 
         DebugHelper.setLabel(pipeline, `RenderPipeline-${_pipelineId}`);
-        Debug.trace(TRACEID_RENDERPIPELINE_ALLOC, `Alloc: Id ${_pipelineId}`, descr);
+        Debug.trace(TRACEID_RENDERPIPELINE_ALLOC, `Alloc: Id ${_pipelineId}, stack: ${DebugGraphics.toString()}`, desc);
 
         WebgpuDebug.end(this.device, {
             renderPipeline: this,
-            descr,
+            desc: desc,
             shader
         });
 

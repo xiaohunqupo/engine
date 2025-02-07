@@ -1,23 +1,30 @@
 import { Debug } from '../../core/debug.js';
 import { now } from '../../core/time.js';
 import { Mat3 } from '../../core/math/mat3.js';
-import { Vec3 } from '../../core/math/vec3.js';
 import { BoundingBox } from '../../core/shape/bounding-box.js';
-
 import {
     PRIMITIVE_TRIANGLES, PRIMITIVE_TRIFAN, PRIMITIVE_TRISTRIP,
     SEMANTIC_POSITION, SEMANTIC_NORMAL, SEMANTIC_TANGENT, SEMANTIC_BLENDINDICES,
     TYPE_FLOAT32,
     typedArrayIndexFormats, typedArrayTypes, typedArrayTypesByteSize
 } from '../../platform/graphics/constants.js';
-
 import { SPRITE_RENDERMODE_SIMPLE } from '../constants.js';
 import { Mesh } from '../mesh.js';
 import { MeshInstance } from '../mesh-instance.js';
-import { shaderChunks } from '../shader-lib/chunks/chunks.js';
 import { Batch } from './batch.js';
 import { BatchGroup } from './batch-group.js';
 import { SkinBatchInstance } from './skin-batch-instance.js';
+
+/**
+ * @import { Entity } from '../../framework/entity.js'
+ * @import { GraphicsDevice } from '../../platform/graphics/graphics-device.js'
+ * @import { Scene } from '../scene.js'
+ */
+
+const _triFanIndices = [0, 1, 3, 2, 3, 1];
+const _triStripIndices = [0, 1, 3, 0, 3, 2];
+
+const mat3 = new Mat3();
 
 function paramsIdentical(a, b) {
     if (a && !b) return false;
@@ -37,20 +44,17 @@ function paramsIdentical(a, b) {
 
 function equalParamSets(params1, params2) {
     for (const param in params1) { // compare A -> B
-        if (params1.hasOwnProperty(param) && !paramsIdentical(params1[param], params2[param]))
+        if (params1.hasOwnProperty(param) && !paramsIdentical(params1[param], params2[param])) {
             return false;
+        }
     }
     for (const param in params2) { // compare B -> A
-        if (params2.hasOwnProperty(param) && !paramsIdentical(params2[param], params1[param]))
+        if (params2.hasOwnProperty(param) && !paramsIdentical(params2[param], params1[param])) {
             return false;
+        }
     }
     return true;
 }
-
-const _triFanIndices = [0, 1, 3, 2, 3, 1];
-const _triStripIndices = [0, 1, 3, 0, 3, 2];
-
-const mat3 = new Mat3();
 
 function getScaleSign(mi) {
     return mi.node.worldTransform.scaleSign;
@@ -65,11 +69,9 @@ class BatchManager {
     /**
      * Create a new BatchManager instance.
      *
-     * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The
-     * graphics device used by the batch manager.
-     * @param {import('../../framework/entity.js').Entity} root - The entity under which batched
-     * models are added.
-     * @param {import('../scene.js').Scene} scene - The scene that the batch manager affects.
+     * @param {GraphicsDevice} device - The graphics device used by the batch manager.
+     * @param {Entity} root - The entity under which batched models are added.
+     * @param {Scene} scene - The scene that the batch manager affects.
      */
     constructor(device, root, scene) {
         this.device = device;
@@ -434,11 +436,11 @@ class BatchManager {
     prepare(meshInstances, dynamic, maxAabbSize = Number.POSITIVE_INFINITY, translucent) {
         if (meshInstances.length === 0) return [];
         const halfMaxAabbSize = maxAabbSize * 0.5;
-        const maxInstanceCount = this.device.supportsBoneTextures ? 1024 : this.device.boneLimit;
+        const maxInstanceCount = 1024;
 
-        // maximum number of vertices that can be used in batch depends on 32bit index buffer support (do this for non-indexed as well,
+        // maximum number of vertices that can be used in batch (do this for non-indexed as well,
         // as in some cases (UI elements) non-indexed geometry gets batched into indexed)
-        const maxNumVertices = this.device.extUintElement ? 0xffffffff : 0xffff;
+        const maxNumVertices = 0xffffffff;
 
         const aabb = new BoundingBox();
         const testAabb = new BoundingBox();
@@ -448,7 +450,7 @@ class BatchManager {
         const lists = [];
         let j = 0;
         if (translucent) {
-            meshInstances.sort(function (a, b) {
+            meshInstances.sort((a, b) => {
                 return a.drawOrder - b.drawOrder;
             });
         }
@@ -568,8 +570,9 @@ class BatchManager {
                     // special case of fan / strip non-indexed primitive used by UI
                     const primitiveType = mesh.primitive[0].type;
                     if (primitiveType === PRIMITIVE_TRIFAN || primitiveType === PRIMITIVE_TRISTRIP) {
-                        if (mesh.primitive[0].count === 4)
+                        if (mesh.primitive[0].count === 4) {
                             batchNumIndices += 6;
+                        }
                     }
                 }
 
@@ -632,10 +635,6 @@ class BatchManager {
         // #endif
 
         if (!this._init) {
-            const boneLimit = '#define BONE_LIMIT ' + this.device.getBoneLimit() + '\n';
-            this.transformVS = boneLimit + '#define DYNAMICBATCH\n' + shaderChunks.transformVS;
-            this.skinTexVS = shaderChunks.skinBatchTexVS;
-            this.skinConstVS = shaderChunks.skinBatchConstVS;
             this.vertexFormats = {};
             this._init = true;
         }
@@ -663,7 +662,6 @@ class BatchManager {
             let verticesOffset = 0;
             let indexOffset = 0;
             let transform;
-            const vec = new Vec3();
 
             // allocate indices
             const indexArrayType = batchNumVerts <= 0xffff ? Uint16Array : Uint32Array;
@@ -679,8 +677,9 @@ class BatchManager {
 
             // build vertex and index data for final mesh
             for (let i = 0; i < meshInstances.length; i++) {
-                if (!meshInstances[i].visible)
+                if (!meshInstances[i].visible) {
                     continue;
+                }
 
                 mesh = meshInstances[i].mesh;
                 numVerts = mesh.vertexBuffer.numVertices;
@@ -702,24 +701,48 @@ class BatchManager {
                         // transform position, normal and tangent to world space
                         if (!dynamic && stream.numComponents >= 3) {
                             if (semantic === SEMANTIC_POSITION) {
+                                const m = transform.data;
+                                const m0 = m[0];
+                                const m1 = m[1];
+                                const m2 = m[2];
+                                const m4 = m[4];
+                                const m5 = m[5];
+                                const m6 = m[6];
+                                const m8 = m[8];
+                                const m9 = m[9];
+                                const m10 = m[10];
+                                const m12 = m[12];
+                                const m13 = m[13];
+                                const m14 = m[14];
+
+                                let x, y, z;
+
                                 for (let j = 0; j < totalComponents; j += stream.numComponents) {
-                                    vec.set(subarray[j], subarray[j + 1], subarray[j + 2]);
-                                    transform.transformPoint(vec, vec);
-                                    subarray[j] = vec.x;
-                                    subarray[j + 1] = vec.y;
-                                    subarray[j + 2] = vec.z;
+                                    x = subarray[j];
+                                    y = subarray[j + 1];
+                                    z = subarray[j + 2];
+
+                                    // mat4.transformVector
+                                    subarray[j] = x * m0 + y * m4 + z * m8 + m12;
+                                    subarray[j + 1] = x * m1 + y * m5 + z * m9 + m13;
+                                    subarray[j + 2] = x * m2 + y * m6 + z * m10 + m14;
                                 }
                             } else if (semantic === SEMANTIC_NORMAL || semantic === SEMANTIC_TANGENT) {
-
                                 // handle non-uniform scale by using transposed inverse matrix to transform vectors
                                 mat3.invertMat4(transform).transpose();
 
+                                const [m0, m1, m2, m3, m4, m5, m6, m7, m8] = mat3.data;
+                                let x, y, z;
+
                                 for (let j = 0; j < totalComponents; j += stream.numComponents) {
-                                    vec.set(subarray[j], subarray[j + 1], subarray[j + 2]);
-                                    mat3.transformVector(vec, vec);
-                                    subarray[j] = vec.x;
-                                    subarray[j + 1] = vec.y;
-                                    subarray[j + 2] = vec.z;
+                                    x = subarray[j];
+                                    y = subarray[j + 1];
+                                    z = subarray[j + 2];
+
+                                    // mat3.transformVector
+                                    subarray[j] = x * m0 + y * m3 + z * m6;
+                                    subarray[j + 1] = x * m1 + y * m4 + z * m7;
+                                    subarray[j + 2] = x * m2 + y * m5 + z * m8;
                                 }
                             }
                         }
@@ -729,8 +752,9 @@ class BatchManager {
                 // bone index is mesh index
                 if (dynamic) {
                     stream = streams[SEMANTIC_BLENDINDICES];
-                    for (let j = 0; j < numVerts; j++)
+                    for (let j = 0; j < numVerts; j++) {
                         stream.buffer[stream.count++] = i;
+                    }
                 }
 
                 // index buffer
@@ -772,17 +796,15 @@ class BatchManager {
                 mesh.setVertexStream(semantic, stream.buffer, stream.numComponents, undefined, stream.dataType, stream.normalize);
             }
 
-            if (indices.length > 0)
+            if (indices.length > 0) {
                 mesh.setIndices(indices);
+            }
 
             mesh.update(PRIMITIVE_TRIANGLES, false);
 
             // Patch the material
             if (dynamic) {
                 material = material.clone();
-                material.chunks.transformVS = this.transformVS;
-                material.chunks.skinTexVS = this.skinTexVS;
-                material.chunks.skinConstVS = this.skinConstVS;
                 material.update();
             }
 
@@ -792,12 +814,14 @@ class BatchManager {
             meshInstance.parameters = batch.origMeshInstances[0].parameters;
             meshInstance.layer = batch.origMeshInstances[0].layer;
             meshInstance._shaderDefs = batch.origMeshInstances[0]._shaderDefs;
+            meshInstance.batching = true;
 
             // meshInstance culling - don't cull UI elements, as they use custom culling Component.isVisibleForCamera
             meshInstance.cull = batch.origMeshInstances[0].cull;
             const batchGroup = this._batchGroups[batchGroupId];
-            if (batchGroup && batchGroup._ui)
+            if (batchGroup && batchGroup._ui) {
                 meshInstance.cull = false;
+            }
 
             if (dynamic) {
                 // Create skinInstance
@@ -880,9 +904,6 @@ class BatchManager {
         if (batch.dynamic) {
             batch2.meshInstance.skinInstance = new SkinBatchInstance(this.device, nodes, this.rootNode);
         }
-
-        batch2.meshInstance.castShadow = batch.meshInstance.castShadow;
-        batch2.meshInstance._shader = batch.meshInstance._shader.slice();
 
         batch2.meshInstance.castShadow = batch.meshInstance.castShadow;
 

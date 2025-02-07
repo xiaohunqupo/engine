@@ -1,8 +1,13 @@
 import { platform } from '../../core/platform.js';
 import { EventHandler } from '../../core/event-handler.js';
-
 import { XRSPACE_VIEWER } from './constants.js';
 import { XrHitTestSource } from './xr-hit-test-source.js';
+
+/**
+ * @import { Ray } from '../../core/shape/ray.js'
+ * @import { XrInputSource } from './xr-input-source.js'
+ * @import { XrManager } from './xr-manager.js'
+ */
 
 /**
  * Callback used by {@link XrHitTest#start} and {@link XrHitTest#startForInputSource}.
@@ -18,7 +23,6 @@ import { XrHitTestSource } from './xr-hit-test-source.js';
  * sources: the view, input sources, or an arbitrary ray in space. Results reflect the underlying
  * AR system's understanding of the real world.
  *
- * @augments EventHandler
  * @category XR
  */
 class XrHitTest extends EventHandler {
@@ -95,7 +99,7 @@ class XrHitTest extends EventHandler {
     static EVENT_ERROR = 'error';
 
     /**
-     * @type {import('./xr-manager.js').XrManager}
+     * @type {XrManager}
      * @private
      */
     manager;
@@ -113,6 +117,12 @@ class XrHitTest extends EventHandler {
     _available = false;
 
     /**
+     * @type {boolean}
+     * @private
+     */
+    _checkingAvailability = false;
+
+    /**
      * List of active {@link XrHitTestSource}.
      *
      * @type {XrHitTestSource[]}
@@ -122,8 +132,8 @@ class XrHitTest extends EventHandler {
     /**
      * Create a new XrHitTest instance.
      *
-     * @param {import('./xr-manager.js').XrManager} manager - WebXR Manager.
-     * @hideconstructor
+     * @param {XrManager} manager - WebXR Manager.
+     * @ignore
      */
     constructor(manager) {
         super();
@@ -138,10 +148,29 @@ class XrHitTest extends EventHandler {
 
     /** @private */
     _onSessionStart() {
-        const available = this.manager.session.enabledFeatures.indexOf('hit-test') !== -1;
-        if (!available) return;
-        this._available = available;
-        this.fire('available');
+        if (this.manager.session.enabledFeatures) {
+            const available = this.manager.session.enabledFeatures.indexOf('hit-test') !== -1;
+            if (!available) return;
+            this._available = available;
+            this.fire('available');
+        } else if (!this._checkingAvailability) {
+            this._checkingAvailability = true;
+
+            // enabledFeatures - is not available, requires alternative way to check feature availability
+
+            this.manager.session.requestReferenceSpace(XRSPACE_VIEWER).then((referenceSpace) => {
+                this.manager.session.requestHitTestSource({
+                    space: referenceSpace
+                }).then((hitTestSource) => {
+                    hitTestSource.cancel();
+
+                    if (this.manager.active) {
+                        this._available = true;
+                        this.fire('available');
+                    }
+                }).catch(() => { });
+            }).catch(() => {});
+        }
     }
 
     /** @private */
@@ -189,7 +218,7 @@ class XrHitTest extends EventHandler {
      * - {@link XRTRACKABLE_MESH}: Mesh - indicates that the hit test results will be computed
      * based on the meshes detected by the underlying Augmented Reality system.
      *
-     * @param {import('../../core/shape/ray.js').Ray} [options.offsetRay] - Optional ray by which
+     * @param {Ray} [options.offsetRay] - Optional ray by which
      * hit test ray can be offset.
      * @param {XrHitTestStartCallback} [options.callback] - Optional callback function called once
      * hit test source is created or failed.
@@ -239,8 +268,9 @@ class XrHitTest extends EventHandler {
             return;
         }
 
-        if (!options.profile && !options.spaceType)
+        if (!options.profile && !options.spaceType) {
             options.spaceType = XRSPACE_VIEWER;
+        }
 
         let xrRay;
         const offsetRay = options.offsetRay;
@@ -292,7 +322,7 @@ class XrHitTest extends EventHandler {
     /**
      * @param {XRHitTestSource} xrHitTestSource - Hit test source.
      * @param {boolean} transient - True if hit test source is created from transient input source.
-     * @param {import('./xr-input-source.js').XrInputSource|null} inputSource - Input Source with which hit test source is associated with.
+     * @param {XrInputSource|null} inputSource - Input Source with which hit test source is associated with.
      * @param {Function} callback - Callback called once hit test source is created.
      * @private
      */
@@ -313,10 +343,14 @@ class XrHitTest extends EventHandler {
     }
 
     /**
-     * @param {*} frame - XRFrame from requestAnimationFrame callback.
+     * @param {XRFrame} frame - XRFrame from requestAnimationFrame callback.
      * @ignore
      */
     update(frame) {
+        if (!this._available) {
+            return;
+        }
+
         for (let i = 0; i < this.sources.length; i++) {
             this.sources[i].update(frame);
         }

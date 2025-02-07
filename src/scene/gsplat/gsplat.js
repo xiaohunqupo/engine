@@ -1,20 +1,29 @@
 import { FloatPacking } from '../../core/math/float-packing.js';
-import { math } from '../../core/math/math.js';
 import { Quat } from '../../core/math/quat.js';
 import { Vec2 } from '../../core/math/vec2.js';
+import { Vec3 } from '../../core/math/vec3.js';
+import { Mat3 } from '../../core/math/mat3.js';
 import {
-    ADDRESS_CLAMP_TO_EDGE, FILTER_NEAREST, PIXELFORMAT_RGB32F, PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F,
-    PIXELFORMAT_RGBA8, SEMANTIC_ATTR13, TYPE_FLOAT32, TYPE_UINT32
+    ADDRESS_CLAMP_TO_EDGE, FILTER_NEAREST, PIXELFORMAT_RGBA16F, PIXELFORMAT_R32U, PIXELFORMAT_RGBA32U,
+    PIXELFORMAT_RGBA8
 } from '../../platform/graphics/constants.js';
 import { Texture } from '../../platform/graphics/texture.js';
-import { VertexFormat } from '../../platform/graphics/vertex-format.js';
+import { BoundingBox } from '../../core/shape/bounding-box.js';
+import { createGSplatMaterial } from './gsplat-material.js';
 
 /**
- * @typedef {object} SplatTextureFormat
- * @property {number} format - The pixel format of the texture.
- * @property {number} numComponents - The number of components in the texture format.
- * @property {boolean} isHalf - Indicates if the format uses half-precision floats.
+ * @import { GSplatData } from './gsplat-data.js'
+ * @import { GraphicsDevice } from '../../platform/graphics/graphics-device.js'
+ * @import { Material } from '../materials/material.js'
  */
+
+const getSHData = (gsplatData, numCoeffs) => {
+    const result = [];
+    for (let i = 0; i < numCoeffs; ++i) {
+        result.push(gsplatData.getProp(`f_rest_${i}`));
+    }
+    return result;
+};
 
 /** @ignore */
 class GSplat {
@@ -22,69 +31,107 @@ class GSplat {
 
     numSplats;
 
-    vertexFormat;
-
-    /** @type {SplatTextureFormat} */
-    format;
-
-    colorTexture;
-
-    scaleTexture;
-
-    rotationTexture;
-
-    /** @type {Texture} */
-    centerTexture;
+    numSplatsVisible;
 
     /** @type {Float32Array} */
     centers;
 
-    /** @type {import('../../core/shape/bounding-box.js').BoundingBox} */
+    /** @type {BoundingBox} */
     aabb;
 
+    /** @type {Texture} */
+    colorTexture;
+
+    /** @type {Texture} */
+    transformATexture;
+
+    /** @type {Texture} */
+    transformBTexture;
+
+    /** @type {0 | 1 | 2 | 3} */
+    shBands;
+
+    /** @type {Texture | undefined} */
+    sh1to3Texture;
+
+    /** @type {Texture | undefined} */
+    sh4to7Texture;
+
+    /** @type {Texture | undefined} */
+    sh8to11Texture;
+
+    /** @type {Texture | undefined} */
+    sh12to15Texture;
+
     /**
-     * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The graphics device.
-     * @param {number} numSplats - Number of splats.
-     * @param {import('../../core/shape/bounding-box.js').BoundingBox} aabb - The bounding box.
+     * @param {GraphicsDevice} device - The graphics device.
+     * @param {GSplatData} gsplatData - The splat data.
      */
-    constructor(device, numSplats, aabb) {
+    constructor(device, gsplatData) {
+        const numSplats = gsplatData.numSplats;
+
         this.device = device;
         this.numSplats = numSplats;
-        this.aabb = aabb;
+        this.numSplatsVisible = numSplats;
 
-        this.vertexFormat = new VertexFormat(device, [
-            { semantic: SEMANTIC_ATTR13, components: 1, type: device.isWebGL1 ? TYPE_FLOAT32 : TYPE_UINT32, asInt: !device.isWebGL1 }
-        ]);
+        this.centers = new Float32Array(gsplatData.numSplats * 3);
+        gsplatData.getCenters(this.centers);
 
-        // create data textures
+        this.aabb = new BoundingBox();
+        gsplatData.calcAabb(this.aabb);
+
         const size = this.evalTextureSize(numSplats);
-        this.format = this.getTextureFormat(device, false);
-        this.colorTexture = this.createTexture(device, 'splatColor', PIXELFORMAT_RGBA8, size);
-        this.scaleTexture = this.createTexture(device, 'splatScale', this.format.format, size);
-        this.rotationTexture = this.createTexture(device, 'splatRotation', this.format.format, size);
-        this.centerTexture = this.createTexture(device, 'splatCenter', this.format.format, size);
+        this.colorTexture = this.createTexture('splatColor', PIXELFORMAT_RGBA8, size);
+        this.transformATexture = this.createTexture('transformA', PIXELFORMAT_RGBA32U, size);
+        this.transformBTexture = this.createTexture('transformB', PIXELFORMAT_RGBA16F, size);
+
+        // write texture data
+        this.updateColorData(gsplatData);
+        this.updateTransformData(gsplatData);
+
+        // initialize SH data
+        this.shBands = gsplatData.shBands;
+        if (this.shBands > 0) {
+            this.sh1to3Texture = this.createTexture('splatSH_1to3', PIXELFORMAT_RGBA32U, size);
+            if (this.shBands > 1) {
+                this.sh4to7Texture = this.createTexture('splatSH_4to7', PIXELFORMAT_RGBA32U, size);
+                if (this.shBands > 2) {
+                    this.sh8to11Texture = this.createTexture('splatSH_8to11', PIXELFORMAT_RGBA32U, size);
+                    this.sh12to15Texture = this.createTexture('splatSH_12to15', PIXELFORMAT_RGBA32U, size);
+                } else {
+                    this.sh8to11Texture = this.createTexture('splatSH_8to11', PIXELFORMAT_R32U, size);
+                }
+            }
+
+            this.updateSHData(gsplatData);
+        }
     }
 
     destroy() {
-        this.colorTexture.destroy();
-        this.scaleTexture.destroy();
-        this.rotationTexture.destroy();
-        this.centerTexture.destroy();
+        this.colorTexture?.destroy();
+        this.transformATexture?.destroy();
+        this.transformBTexture?.destroy();
+        this.sh1to3Texture?.destroy();
+        this.sh4to7Texture?.destroy();
+        this.sh8to11Texture?.destroy();
+        this.sh12to15Texture?.destroy();
     }
 
     /**
-     * @param {import('../materials/material.js').Material} material - The material to set up for
-     * the splat rendering.
+     * @returns {Material} material - The material to set up for the splat rendering.
      */
-    setupMaterial(material) {
-
-        material.setParameter('splatColor', this.colorTexture);
-        material.setParameter('splatScale', this.scaleTexture);
-        material.setParameter('splatRotation', this.rotationTexture);
-        material.setParameter('splatCenter', this.centerTexture);
-
-        const { width, height } = this.colorTexture;
-        material.setParameter('tex_params', new Float32Array([width, height, 1 / width, 1 / height]));
+    createMaterial(options) {
+        const result = createGSplatMaterial(options);
+        result.setParameter('splatColor', this.colorTexture);
+        result.setParameter('transformA', this.transformATexture);
+        result.setParameter('transformB', this.transformBTexture);
+        result.setParameter('numSplats', this.numSplatsVisible);
+        result.setDefine('SH_BANDS', this.shBands);
+        result.setParameter('splatSH_1to3', this.sh1to3Texture);
+        result.setParameter('splatSH_4to7', this.sh4to7Texture);
+        result.setParameter('splatSH_8to11', this.sh8to11Texture);
+        result.setParameter('splatSH_12to15', this.sh12to15Texture);
+        return result;
     }
 
     /**
@@ -104,14 +151,13 @@ class GSplat {
     /**
      * Creates a new texture with the specified parameters.
      *
-     * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The graphics device to use for the texture creation.
      * @param {string} name - The name of the texture to be created.
      * @param {number} format - The pixel format of the texture.
      * @param {Vec2} size - The size of the texture in a Vec2 object, containing width (x) and height (y).
      * @returns {Texture} The created texture instance.
      */
-    createTexture(device, name, format, size) {
-        return new Texture(device, {
+    createTexture(name, format, size) {
+        return new Texture(this.device, {
             name: name,
             width: size.x,
             height: size.y,
@@ -126,180 +172,200 @@ class GSplat {
     }
 
     /**
-     * Gets the most suitable texture format based on device capabilities.
-     *
-     * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The graphics device.
-     * @param {boolean} preferHighPrecision - True to prefer high precision when available.
-     * @returns {SplatTextureFormat} The texture format info or undefined if not available.
-     */
-    getTextureFormat(device, preferHighPrecision) {
-        const halfFormat = (device.extTextureHalfFloat && device.textureHalfFloatUpdatable) ? PIXELFORMAT_RGBA16F : undefined;
-        const half = halfFormat ? {
-            format: halfFormat,
-            numComponents: 4,
-            isHalf: true
-        } : undefined;
-
-        const floatFormat = device.isWebGPU ? PIXELFORMAT_RGBA32F : (device.extTextureFloat ? PIXELFORMAT_RGB32F : undefined);
-        const float = floatFormat ? {
-            format: floatFormat,
-            numComponents: floatFormat === PIXELFORMAT_RGBA32F ? 4 : 3,
-            isHalf: false
-        } : undefined;
-
-        return preferHighPrecision ? (float ?? half) : (half ?? float);
-    }
-
-    /**
      * Updates pixel data of this.colorTexture based on the supplied color components and opacity.
      * Assumes that the texture is using an RGBA format where RGB are color components influenced
      * by SH spherical harmonics and A is opacity after a sigmoid transformation.
      *
-     * @param {Float32Array} c0 - The first color component SH coefficients.
-     * @param {Float32Array} c1 - The second color component SH coefficients.
-     * @param {Float32Array} c2 - The third color component SH coefficients.
-     * @param {Float32Array} opacity - The opacity values to be transformed using a sigmoid function.
+     * @param {GSplatData} gsplatData - The source data
      */
-    updateColorData(c0, c1, c2, opacity) {
-        const SH_C0 = 0.28209479177387814;
+    updateColorData(gsplatData) {
         const texture = this.colorTexture;
+        if (!texture) {
+            return;
+        }
         const data = texture.lock();
 
-        /**
-         * Calculates the sigmoid of a given value.
-         *
-         * @param {number} v - The value for which to compute the sigmoid function.
-         * @returns {number} The result of the sigmoid function.
-         */
-        const sigmoid = (v) => {
-            if (v > 0) {
-                return 1 / (1 + Math.exp(-v));
-            }
+        const cr = gsplatData.getProp('f_dc_0');
+        const cg = gsplatData.getProp('f_dc_1');
+        const cb = gsplatData.getProp('f_dc_2');
+        const ca = gsplatData.getProp('opacity');
 
-            const t = Math.exp(v);
-            return t / (1 + t);
-        };
+        const SH_C0 = 0.28209479177387814;
 
         for (let i = 0; i < this.numSplats; ++i) {
+            const r = (cr[i] * SH_C0 + 0.5) * 255;
+            const g = (cg[i] * SH_C0 + 0.5) * 255;
+            const b = (cb[i] * SH_C0 + 0.5) * 255;
+            const a = 255 / (1 + Math.exp(-ca[i]));
 
-            // colors
-            if (c0 && c1 && c2) {
-                data[i * 4 + 0] = math.clamp((0.5 + SH_C0 * c0[i]) * 255, 0, 255);
-                data[i * 4 + 1] = math.clamp((0.5 + SH_C0 * c1[i]) * 255, 0, 255);
-                data[i * 4 + 2] = math.clamp((0.5 + SH_C0 * c2[i]) * 255, 0, 255);
-            }
-
-            // opacity
-            data[i * 4 + 3] = opacity ? math.clamp(sigmoid(opacity[i]) * 255, 0, 255) : 255;
+            data[i * 4 + 0] = r < 0 ? 0 : r > 255 ? 255 : r;
+            data[i * 4 + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+            data[i * 4 + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+            data[i * 4 + 3] = a < 0 ? 0 : a > 255 ? 255 : a;
         }
 
         texture.unlock();
     }
 
     /**
-     * Updates pixel data of this.scaleTexture based based on the supplied scale components.
-     * The scales are exponentiated before being stored in the texture, and if the texture
-     * format uses half precision, the scale values are converted accordingly.
-     *
-     * @param {Float32Array} scale0 - The first scale component associated with the x-dimension.
-     * @param {Float32Array} scale1 - The second scale component associated with the y-dimension.
-     * @param {Float32Array} scale2 - The third scale component associated with the z-dimension.
+     * @param {GSplatData} gsplatData - The source data
      */
-    updateScaleData(scale0, scale1, scale2) {
-        const { numComponents, isHalf } = this.format;
-        const texture = this.scaleTexture;
-        const data = texture.lock();
+    updateTransformData(gsplatData) {
+
         const float2Half = FloatPacking.float2Half;
 
-        for (let i = 0; i < this.numSplats; i++) {
-
-            const sx = Math.exp(scale0[i]);
-            const sy = Math.exp(scale1[i]);
-            const sz = Math.exp(scale2[i]);
-
-            if (isHalf) {
-                data[i * numComponents + 0] = float2Half(sx);
-                data[i * numComponents + 1] = float2Half(sy);
-                data[i * numComponents + 2] = float2Half(sz);
-            } else {
-                data[i * numComponents + 0] = sx;
-                data[i * numComponents + 1] = sy;
-                data[i * numComponents + 2] = sz;
-            }
+        if (!this.transformATexture) {
+            return;
         }
 
-        texture.unlock();
+        const dataA = this.transformATexture.lock();
+        const dataAFloat32 = new Float32Array(dataA.buffer);
+        const dataB = this.transformBTexture.lock();
+
+        const p = new Vec3();
+        const r = new Quat();
+        const s = new Vec3();
+        const iter = gsplatData.createIter(p, r, s);
+
+        const mat = new Mat3();
+        const cA = new Vec3();
+        const cB = new Vec3();
+
+        for (let i = 0; i < this.numSplats; i++) {
+            iter.read(i);
+
+            r.normalize();
+            mat.setFromQuat(r);
+
+            this.computeCov3d(mat, s, cA, cB);
+
+            dataAFloat32[i * 4 + 0] = p.x;
+            dataAFloat32[i * 4 + 1] = p.y;
+            dataAFloat32[i * 4 + 2] = p.z;
+            dataA[i * 4 + 3] = float2Half(cB.x) | (float2Half(cB.y) << 16);
+
+            dataB[i * 4 + 0] = float2Half(cA.x);
+            dataB[i * 4 + 1] = float2Half(cA.y);
+            dataB[i * 4 + 2] = float2Half(cA.z);
+            dataB[i * 4 + 3] = float2Half(cB.z);
+        }
+
+        this.transformATexture.unlock();
+        this.transformBTexture.unlock();
     }
 
     /**
-     * Updates pixel data of this.rotationTexture based on the supplied quaternion components.
-     * Quaternions are normalized and conjugated if the 'w' component is negative.
-     * The quaternion components are stored as either half or full precision floats depending on the texture format.
+     * Evaluate the covariance values based on the rotation and scale.
      *
-     * @param {Float32Array} rot0 - The array containing the 'x' component of quaternion rotations.
-     * @param {Float32Array} rot1 - The array containing the 'y' component of quaternion rotations.
-     * @param {Float32Array} rot2 - The array containing the 'z' component of quaternion rotations.
-     * @param {Float32Array} rot3 - The array containing the 'w' component of quaternion rotations.
+     * @param {Mat3} rot - The rotation matrix.
+     * @param {Vec3} scale - The scale.
+     * @param {Vec3} covA - The first covariance vector.
+     * @param {Vec3} covB - The second covariance vector.
      */
-    updateRotationData(rot0, rot1, rot2, rot3) {
-        const { numComponents, isHalf } = this.format;
-        const quat = new Quat();
+    computeCov3d(rot, scale, covA, covB) {
+        const sx = scale.x;
+        const sy = scale.y;
+        const sz = scale.z;
 
-        const texture = this.rotationTexture;
-        const data = texture.lock();
-        const float2Half = FloatPacking.float2Half;
+        const data = rot.data;
+        const r00 = data[0] * sx; const r01 = data[1] * sx; const r02 = data[2] * sx;
+        const r10 = data[3] * sy; const r11 = data[4] * sy; const r12 = data[5] * sy;
+        const r20 = data[6] * sz; const r21 = data[7] * sz; const r22 = data[8] * sz;
 
-        for (let i = 0; i < this.numSplats; i++) {
+        covA.x = r00 * r00 + r10 * r10 + r20 * r20;
+        covA.y = r00 * r01 + r10 * r11 + r20 * r21;
+        covA.z = r00 * r02 + r10 * r12 + r20 * r22;
 
-            quat.set(rot0[i], rot1[i], rot2[i], rot3[i]).normalize();
-
-            if (quat.w < 0) {
-                quat.conjugate();
-            }
-
-            if (isHalf) {
-                data[i * numComponents + 0] = float2Half(quat.x);
-                data[i * numComponents + 1] = float2Half(quat.y);
-                data[i * numComponents + 2] = float2Half(quat.z);
-            } else {
-                data[i * numComponents + 0] = quat.x;
-                data[i * numComponents + 1] = quat.y;
-                data[i * numComponents + 2] = quat.z;
-            }
-        }
-
-        texture.unlock();
+        covB.x = r01 * r01 + r11 * r11 + r21 * r21;
+        covB.y = r01 * r02 + r11 * r12 + r21 * r22;
+        covB.z = r02 * r02 + r12 * r12 + r22 * r22;
     }
 
     /**
-     * Updates pixel data of this.centerTexture based on the supplied center coordinates.
-     * The center coordinates are stored as either half or full precision floats depending on the texture format.
-     *
-     * @param {Float32Array} x - The array containing the 'x' component of the center points.
-     * @param {Float32Array} y - The array containing the 'y' component of the center points.
-     * @param {Float32Array} z - The array containing the 'z' component of the center points.
+     * @param {GSplatData} gsplatData - The source data
      */
-    updateCenterData(x, y, z) {
-        const { numComponents, isHalf } = this.format;
+    updateSHData(gsplatData) {
+        const sh1to3Data = this.sh1to3Texture.lock();
+        const sh4to7Data = this.sh4to7Texture?.lock();
+        const sh8to11Data = this.sh8to11Texture?.lock();
+        const sh12to15Data = this.sh12to15Texture?.lock();
 
-        const texture = this.centerTexture;
-        const data = texture.lock();
-        const float2Half = FloatPacking.float2Half;
+        const numCoeffs = {
+            1: 3,
+            2: 8,
+            3: 15
+        }[this.shBands];
 
-        for (let i = 0; i < this.numSplats; i++) {
+        const src = getSHData(gsplatData, numCoeffs * 3);
 
-            if (isHalf) {
-                data[i * numComponents + 0] = float2Half(x[i]);
-                data[i * numComponents + 1] = float2Half(y[i]);
-                data[i * numComponents + 2] = float2Half(z[i]);
-            } else {
-                data[i * numComponents + 0] = x[i];
-                data[i * numComponents + 1] = y[i];
-                data[i * numComponents + 2] = z[i];
+        const t11 = (1 << 11) - 1;
+        const t10 = (1 << 10) - 1;
+
+        const float32 = new Float32Array(1);
+        const uint32 = new Uint32Array(float32.buffer);
+
+        // coefficients
+        const c = new Array(numCoeffs * 3).fill(0);
+
+        for (let i = 0; i < gsplatData.numSplats; ++i) {
+            // extract coefficients
+            for (let j = 0; j < numCoeffs; ++j) {
+                c[j * 3] = src[j][i];
+                c[j * 3 + 1] = src[j + numCoeffs][i];
+                c[j * 3 + 2] = src[j + numCoeffs * 2][i];
+            }
+
+            // calc maximum value
+            let max = c[0];
+            for (let j = 1; j < numCoeffs * 3; ++j) {
+                max = Math.max(max, Math.abs(c[j]));
+            }
+
+            if (max === 0) {
+                continue;
+            }
+
+            // normalize
+            for (let j = 0; j < numCoeffs; ++j) {
+                c[j * 3 + 0] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 0] / max * 0.5 + 0.5) * t11 + 0.5)));
+                c[j * 3 + 1] = Math.max(0, Math.min(t10, Math.floor((c[j * 3 + 1] / max * 0.5 + 0.5) * t10 + 0.5)));
+                c[j * 3 + 2] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 2] / max * 0.5 + 0.5) * t11 + 0.5)));
+            }
+
+            // pack
+            float32[0] = max;
+
+            sh1to3Data[i * 4 + 0] = uint32[0];
+            sh1to3Data[i * 4 + 1] = c[0] << 21 | c[1] << 11 | c[2];
+            sh1to3Data[i * 4 + 2] = c[3] << 21 | c[4] << 11 | c[5];
+            sh1to3Data[i * 4 + 3] = c[6] << 21 | c[7] << 11 | c[8];
+
+            if (this.shBands > 1) {
+                sh4to7Data[i * 4 + 0] = c[9] << 21 | c[10] << 11 | c[11];
+                sh4to7Data[i * 4 + 1] = c[12] << 21 | c[13] << 11 | c[14];
+                sh4to7Data[i * 4 + 2] = c[15] << 21 | c[16] << 11 | c[17];
+                sh4to7Data[i * 4 + 3] = c[18] << 21 | c[19] << 11 | c[20];
+
+                if (this.shBands > 2) {
+                    sh8to11Data[i * 4 + 0] = c[21] << 21 | c[22] << 11 | c[23];
+                    sh8to11Data[i * 4 + 1] = c[24] << 21 | c[25] << 11 | c[26];
+                    sh8to11Data[i * 4 + 2] = c[27] << 21 | c[28] << 11 | c[29];
+                    sh8to11Data[i * 4 + 3] = c[30] << 21 | c[31] << 11 | c[32];
+
+                    sh12to15Data[i * 4 + 0] = c[33] << 21 | c[34] << 11 | c[35];
+                    sh12to15Data[i * 4 + 1] = c[36] << 21 | c[37] << 11 | c[38];
+                    sh12to15Data[i * 4 + 2] = c[39] << 21 | c[40] << 11 | c[41];
+                    sh12to15Data[i * 4 + 3] = c[42] << 21 | c[43] << 11 | c[44];
+                } else {
+                    sh8to11Data[i] = c[21] << 21 | c[22] << 11 | c[23];
+                }
             }
         }
 
-        texture.unlock();
+        this.sh1to3Texture.unlock();
+        this.sh4to7Texture?.unlock();
+        this.sh8to11Texture?.unlock();
+        this.sh12to15Texture?.unlock();
     }
 }
 

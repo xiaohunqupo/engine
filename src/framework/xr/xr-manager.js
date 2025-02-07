@@ -1,14 +1,10 @@
-import { Debug } from "../../core/debug.js";
-
+import { Debug } from '../../core/debug.js';
 import { EventHandler } from '../../core/event-handler.js';
 import { platform } from '../../core/platform.js';
 import { Mat4 } from '../../core/math/mat4.js';
 import { Quat } from '../../core/math/quat.js';
 import { Vec3 } from '../../core/math/vec3.js';
-
-import { XRTYPE_INLINE, XRTYPE_VR, XRTYPE_AR, XRDEPTHSENSINGUSAGE_CPU, XRDEPTHSENSINGFORMAT_L8A8 } from './constants.js';
-import { DEVICETYPE_WEBGL1, DEVICETYPE_WEBGL2 } from '../../platform/graphics/constants.js';
-import { XrDepthSensing } from './xr-depth-sensing.js';
+import { XRTYPE_INLINE, XRTYPE_VR, XRTYPE_AR, XRDEPTHSENSINGUSAGE_CPU, XRDEPTHSENSINGUSAGE_GPU, XRDEPTHSENSINGFORMAT_L8A8, XRDEPTHSENSINGFORMAT_R16U, XRDEPTHSENSINGFORMAT_F32 } from './constants.js';
 import { XrDomOverlay } from './xr-dom-overlay.js';
 import { XrHitTest } from './xr-hit-test.js';
 import { XrImageTracking } from './xr-image-tracking.js';
@@ -18,6 +14,12 @@ import { XrPlaneDetection } from './xr-plane-detection.js';
 import { XrAnchors } from './xr-anchors.js';
 import { XrMeshDetection } from './xr-mesh-detection.js';
 import { XrViews } from './xr-views.js';
+
+/**
+ * @import { AppBase } from '../app-base.js'
+ * @import { CameraComponent } from '../components/camera/component.js'
+ * @import { Entity } from '../entity.js'
+ */
 
 /**
  * Callback used by {@link XrManager#endXr} and {@link XrManager#startXr}.
@@ -36,7 +38,6 @@ import { XrViews } from './xr-views.js';
 /**
  * Manage and update XR session and its states.
  *
- * @augments EventHandler
  * @category XR
  */
 class XrManager extends EventHandler {
@@ -110,7 +111,7 @@ class XrManager extends EventHandler {
     static EVENT_ERROR = 'error';
 
     /**
-     * @type {import('../app-base.js').AppBase}
+     * @type {AppBase}
      * @ignore
      */
     app;
@@ -162,14 +163,6 @@ class XrManager extends EventHandler {
      * @ignore
      */
     _referenceSpace = null;
-
-    /**
-     * Provides access to depth sensing capabilities.
-     *
-     * @type {XrDepthSensing}
-     * @ignore
-     */
-    depthSensing;
 
     /**
      * Provides access to DOM overlay capabilities.
@@ -236,7 +229,7 @@ class XrManager extends EventHandler {
     anchors;
 
     /**
-     * @type {import('../components/camera/component.js').CameraComponent}
+     * @type {CameraComponent}
      * @private
      */
     _camera = null;
@@ -266,6 +259,12 @@ class XrManager extends EventHandler {
     _depthFar = 1000;
 
     /**
+     * @type {number[]|null}
+     * @private
+     */
+    _supportedFrameRates = null;
+
+    /**
      * @type {number}
      * @private
      */
@@ -278,10 +277,16 @@ class XrManager extends EventHandler {
     _height = 0;
 
     /**
+     * @type {number}
+     * @private
+     */
+    _framebufferScaleFactor = 1.0;
+
+    /**
      * Create a new XrManager instance.
      *
-     * @param {import('../app-base.js').AppBase} app - The main application.
-     * @hideconstructor
+     * @param {AppBase} app - The main application.
+     * @ignore
      */
     constructor(app) {
         super();
@@ -294,7 +299,6 @@ class XrManager extends EventHandler {
         this._available[XRTYPE_AR] = false;
 
         this.views = new XrViews(this);
-        this.depthSensing = new XrDepthSensing(this);
         this.domOverlay = new XrDomOverlay(this);
         this.hitTest = new XrHitTest(this);
         this.imageTracking = new XrImageTracking(this);
@@ -333,8 +337,8 @@ class XrManager extends EventHandler {
      * callback when session is created or failed to create. Integrated XR APIs need to be enabled
      * by providing relevant options.
      *
-     * @param {import('../components/camera/component.js').CameraComponent} camera - It will be
-     * used to render XR session and manipulated based on pose tracking.
+     * @param {CameraComponent} camera - It will be used to render XR session and manipulated based
+     * on pose tracking.
      * @param {string} type - Session type. Can be one of the following:
      *
      * - {@link XRTYPE_INLINE}: Inline - always available type of session. It has limited features
@@ -361,6 +365,9 @@ class XrManager extends EventHandler {
      * starting point.
      *
      * @param {object} [options] - Object with additional options for XR session initialization.
+     * @param {number} [options.framebufferScaleFactor] - Framebuffer scale factor should
+     * be higher than 0.0, by default 1.0 (no scaling). A value of 0.5 will reduce the resolution
+     * of an XR session in half, and a value of 2.0 will double the resolution.
      * @param {string[]} [options.optionalFeatures] - Optional features for XRSession start. It is
      * used for getting access to additional WebXR spec extensions.
      * @param {boolean} [options.anchors] - Set to true to attempt to enable
@@ -374,8 +381,8 @@ class XrManager extends EventHandler {
      * @param {XrErrorCallback} [options.callback] - Optional callback function called once session
      * is started. The callback has one argument Error - it is null if successfully started XR
      * session.
-     * @param {object} [options.depthSensing] - Optional object with depth sensing parameters to
-     * attempt to enable {@link XrDepthSensing}.
+     * @param {object} [options.depthSensing] - Optional object with parameters to attempt to enable
+     * depth sensing.
      * @param {string} [options.depthSensing.usagePreference] - Optional usage preference for depth
      * sensing, can be 'cpu-optimized' or 'gpu-optimized' (XRDEPTHSENSINGUSAGE_*), defaults to
      * 'cpu-optimized'. Most preferred and supported will be chosen by the underlying depth sensing
@@ -385,11 +392,11 @@ class XrManager extends EventHandler {
      * (XRDEPTHSENSINGFORMAT_*), defaults to 'luminance-alpha'. Most preferred and supported will
      * be chosen by the underlying depth sensing system.
      * @example
-     * button.on('click', function () {
+     * button.on('click', () => {
      *     app.xr.start(camera, pc.XRTYPE_VR, pc.XRSPACE_LOCALFLOOR);
      * });
      * @example
-     * button.on('click', function () {
+     * button.on('click', () => {
      *     app.xr.start(camera, pc.XRTYPE_AR, pc.XRSPACE_LOCALFLOOR, {
      *         anchors: true,
      *         imageTracking: true,
@@ -400,8 +407,9 @@ class XrManager extends EventHandler {
     start(camera, type, spaceType, options) {
         let callback = options;
 
-        if (typeof options === 'object')
+        if (typeof options === 'object') {
             callback = options.callback;
+        }
 
         if (!this._available[type]) {
             if (callback) callback(new Error('XR is not available'));
@@ -418,6 +426,8 @@ class XrManager extends EventHandler {
         this._type = type;
         this._spaceType = spaceType;
 
+        this._framebufferScaleFactor = options?.framebufferScaleFactor ?? 1.0;
+
         this._setClipPlanes(camera.nearClip, camera.farClip);
 
         // TODO
@@ -433,21 +443,24 @@ class XrManager extends EventHandler {
             optionalFeatures: []
         };
 
-        const webgl = this.app.graphicsDevice?.isWebGL1 || this.app.graphicsDevice?.isWebGL2;
+        const webgl = this.app.graphicsDevice?.isWebGL2;
 
         if (type === XRTYPE_AR) {
             opts.optionalFeatures.push('light-estimation');
             opts.optionalFeatures.push('hit-test');
 
             if (options) {
-                if (options.imageTracking && this.imageTracking.supported)
+                if (options.imageTracking && this.imageTracking.supported) {
                     opts.optionalFeatures.push('image-tracking');
+                }
 
-                if (options.planeDetection)
+                if (options.planeDetection) {
                     opts.optionalFeatures.push('plane-detection');
+                }
 
-                if (options.meshDetection)
+                if (options.meshDetection) {
                     opts.optionalFeatures.push('mesh-detection');
+                }
             }
 
             if (this.domOverlay.supported && this.domOverlay.root) {
@@ -459,11 +472,14 @@ class XrManager extends EventHandler {
                 opts.optionalFeatures.push('anchors');
             }
 
-            if (options && options.depthSensing && this.depthSensing.supported) {
+            if (options && options.depthSensing && this.views.supportedDepth) {
                 opts.optionalFeatures.push('depth-sensing');
 
-                const usagePreference = [XRDEPTHSENSINGUSAGE_CPU];
-                const dataFormatPreference = [XRDEPTHSENSINGFORMAT_L8A8];
+                const usagePreference = [];
+                const dataFormatPreference = [];
+
+                usagePreference.push(XRDEPTHSENSINGUSAGE_GPU, XRDEPTHSENSINGUSAGE_CPU);
+                dataFormatPreference.push(XRDEPTHSENSINGFORMAT_F32, XRDEPTHSENSINGFORMAT_L8A8, XRDEPTHSENSINGFORMAT_R16U);
 
                 if (options.depthSensing.usagePreference) {
                     const ind = usagePreference.indexOf(options.depthSensing.usagePreference);
@@ -490,8 +506,9 @@ class XrManager extends EventHandler {
 
         opts.optionalFeatures.push('hand-tracking');
 
-        if (options && options.optionalFeatures)
+        if (options && options.optionalFeatures) {
             opts.optionalFeatures = opts.optionalFeatures.concat(options.optionalFeatures);
+        }
 
         if (this.imageTracking.supported && this.imageTracking.images.length) {
             this.imageTracking.prepareImages((err, trackedImages) => {
@@ -501,8 +518,9 @@ class XrManager extends EventHandler {
                     return;
                 }
 
-                if (trackedImages !== null)
+                if (trackedImages !== null) {
                     opts.trackedImages = trackedImages;
+                }
 
                 this._onStartOptionsReady(type, spaceType, opts, callback);
             });
@@ -540,7 +558,7 @@ class XrManager extends EventHandler {
      * started. The callback has one argument Error - it is null if successfully started XR
      * session.
      * @example
-     * app.keyboard.on('keydown', function (evt) {
+     * app.keyboard.on('keydown', (evt) => {
      *     if (evt.key === pc.KEY_ESCAPE && app.xr.active) {
      *         app.xr.end();
      *     }
@@ -560,7 +578,7 @@ class XrManager extends EventHandler {
     }
 
     /**
-     * Check if specific type of session is available.
+     * Check if the specified type of session is available.
      *
      * @param {string} type - Session type. Can be one of the following:
      *
@@ -575,7 +593,7 @@ class XrManager extends EventHandler {
      * if (app.xr.isAvailable(pc.XRTYPE_VR)) {
      *     // VR is available
      * }
-     * @returns {boolean} True if specified session type is available.
+     * @returns {boolean} True if the specified session type is available.
      */
     isAvailable(type) {
         return this._available[type];
@@ -623,17 +641,42 @@ class XrManager extends EventHandler {
     }
 
     /**
+     * Update target frame rate of an XR session to one of supported value provided by
+     * supportedFrameRates list.
+     *
+     * @param {number} frameRate - Target frame rate. It should be any value from the list
+     * of supportedFrameRates.
+     * @param {Function} [callback] - Callback that will be called when frameRate has been
+     * updated or failed to update with error provided.
+     */
+    updateTargetFrameRate(frameRate, callback) {
+        if (!this._session?.updateTargetFrameRate) {
+            callback?.(new Error('unable to update frameRate'));
+            return;
+        }
+
+        this._session.updateTargetFrameRate(frameRate)
+        .then(() => {
+            callback?.();
+        })
+        .catch((err) => {
+            callback?.(err);
+        });
+    }
+
+    /**
      * @param {string} type - Session type.
      * @private
      */
     _sessionSupportCheck(type) {
         navigator.xr.isSessionSupported(type).then((available) => {
-            if (this._available[type] === available)
+            if (this._available[type] === available) {
                 return;
+            }
 
             this._available[type] = available;
             this.fire('available', type, available);
-            this.fire('available:' + type, available);
+            this.fire(`available:${type}`, available);
         }).catch((ex) => {
             this.fire('error', ex);
         });
@@ -681,8 +724,9 @@ class XrManager extends EventHandler {
 
             // old requestAnimationFrame will never be triggered,
             // so queue up new tick
-            if (this.app.systems)
+            if (this.app.systems) {
                 this.app.tick();
+            }
         };
 
         session.addEventListener('end', onEnd);
@@ -692,11 +736,21 @@ class XrManager extends EventHandler {
         this._camera.on('set_farClip', onClipPlanesChange);
 
         // A framebufferScaleFactor scale of 1 is the full resolution of the display
-        // so we need to calculate this based on devicePixelRatio of the dislay and what
+        // so we need to calculate this based on devicePixelRatio of the display and what
         // we've set this in the graphics device
         Debug.assert(window, 'window is needed to scale the XR framebuffer. Are you running XR headless?');
 
         this._createBaseLayer();
+
+        if (this.session.supportedFrameRates) {
+            this._supportedFrameRates = Array.from(this.session.supportedFrameRates);
+        } else {
+            this._supportedFrameRates = null;
+        }
+
+        this._session.addEventListener('frameratechange', () => {
+            this.fire('frameratechange', this._session?.frameRate);
+        });
 
         // request reference space
         session.requestReferenceSpace(spaceType).then((referenceSpace) => {
@@ -722,14 +776,16 @@ class XrManager extends EventHandler {
      * @private
      */
     _setClipPlanes(near, far) {
-        if (this._depthNear === near && this._depthFar === far)
+        if (this._depthNear === near && this._depthFar === far) {
             return;
+        }
 
         this._depthNear = near;
         this._depthFar = far;
 
-        if (!this._session)
+        if (!this._session) {
             return;
+        }
 
         // if session is available,
         // queue up render state update
@@ -741,7 +797,7 @@ class XrManager extends EventHandler {
 
     _createBaseLayer() {
         const device = this.app.graphicsDevice;
-        const framebufferScaleFactor = device.maxPixelRatio / window.devicePixelRatio;
+        const framebufferScaleFactor = (device.maxPixelRatio / window.devicePixelRatio) * this._framebufferScaleFactor;
 
         this._baseLayer = new XRWebGLLayer(this._session, device.gl, {
             alpha: true,
@@ -751,10 +807,9 @@ class XrManager extends EventHandler {
             antialias: false
         });
 
-        const deviceType = device.deviceType;
-        if ((deviceType === DEVICETYPE_WEBGL1 || deviceType === DEVICETYPE_WEBGL2) && window.XRWebGLBinding) {
+        if (device?.isWebGL2 && window.XRWebGLBinding) {
             try {
-                this.webglBinding = new XRWebGLBinding(this._session, device.gl); // eslint-disable-line no-undef
+                this.webglBinding = new XRWebGLBinding(this._session, device.gl);
             } catch (ex) {
                 this.fire('error', ex);
             }
@@ -769,11 +824,13 @@ class XrManager extends EventHandler {
 
     /** @private */
     _onDeviceLost() {
-        if (!this._session)
+        if (!this._session) {
             return;
+        }
 
-        if (this.webglBinding)
+        if (this.webglBinding) {
             this.webglBinding = null;
+        }
 
         this._baseLayer = null;
 
@@ -786,23 +843,23 @@ class XrManager extends EventHandler {
 
     /** @private */
     _onDeviceRestored() {
-        if (!this._session)
+        if (!this._session) {
             return;
+        }
 
         setTimeout(() => {
             this.app.graphicsDevice.gl.makeXRCompatible()
-                .then(() => {
-                    this._createBaseLayer();
-                })
-                .catch((ex) => {
-                    this.fire('error', ex);
-                });
+            .then(() => {
+                this._createBaseLayer();
+            })
+            .catch((ex) => {
+                this.fire('error', ex);
+            });
         }, 0);
     }
 
     /**
-     * @param {*} frame - XRFrame from requestAnimationFrame callback.
-     *
+     * @param {XRFrame} frame - XRFrame from requestAnimationFrame callback.
      * @returns {boolean} True if update was successful, false otherwise.
      * @ignore
      */
@@ -864,26 +921,29 @@ class XrManager extends EventHandler {
         this.input.update(frame);
 
         if (this._type === XRTYPE_AR) {
-            if (this.hitTest.supported)
+            if (this.hitTest.supported) {
                 this.hitTest.update(frame);
+            }
 
-            if (this.lightEstimation.supported)
+            if (this.lightEstimation.supported) {
                 this.lightEstimation.update(frame);
+            }
 
-            if (this.imageTracking.supported)
+            if (this.imageTracking.supported) {
                 this.imageTracking.update(frame);
+            }
 
-            if (this.anchors.supported)
+            if (this.anchors.supported) {
                 this.anchors.update(frame);
+            }
 
-            if (this.planeDetection.supported)
+            if (this.planeDetection.supported) {
                 this.planeDetection.update(frame);
+            }
 
-            if (this.depthSensing.supported)
-                this.depthSensing.update();
-
-            if (this.meshDetection.supported)
+            if (this.meshDetection.supported) {
                 this.meshDetection.update(frame);
+            }
         }
 
         this.fire('update', frame);
@@ -939,9 +999,66 @@ class XrManager extends EventHandler {
     }
 
     /**
+     * XR session frameRate or null if this information is not available. This value can change
+     * during an active XR session.
+     *
+     * @type {number|null}
+     */
+    get frameRate() {
+        return this._session?.frameRate ?? null;
+    }
+
+    /**
+     * List of supported frame rates, or null if this data is not available.
+     *
+     * @type {number[]|null}
+     */
+    get supportedFrameRates() {
+        return this._supportedFrameRates;
+    }
+
+    /**
+     * Framebuffer scale factor. This value is read-only and can only be set when starting a new
+     * XR session.
+     *
+     * @type {number}
+     */
+    get framebufferScaleFactor() {
+        return this._framebufferScaleFactor;
+    }
+
+    /**
+     * Set fixed foveation to the value between 0 and 1. Where 0 is no foveation and 1 is highest
+     * foveation. It only can be set during an active XR session. Fixed foveation will reduce the
+     * resolution of the back buffer at the edges of the screen, which can improve rendering
+     * performance.
+     *
+     * @type {number}
+     */
+    set fixedFoveation(value) {
+        if ((this._baseLayer?.fixedFoveation ?? null) !== null) {
+            if (this.app.graphicsDevice.samples > 1) {
+                Debug.warn('Fixed Foveation is ignored. Disable anti-aliasing for it to be effective.');
+            }
+
+            this._baseLayer.fixedFoveation = value;
+        }
+    }
+
+    /**
+     * Gets the current fixed foveation level, which is between 0 and 1. 0 is no forveation and 1
+     * is highest foveation. If fixed foveation is not supported, this value returns null.
+     *
+     * @type {number|null}
+     */
+    get fixedFoveation() {
+        return this._baseLayer?.fixedFoveation ?? null;
+    }
+
+    /**
      * Active camera for which XR session is running or null.
      *
-     * @type {import('../entity.js').Entity|null}
+     * @type {Entity|null}
      */
     get camera() {
         return this._camera ? this._camera.entity : null;
@@ -951,12 +1068,13 @@ class XrManager extends EventHandler {
      * Indicates whether WebXR content is currently visible to the user, and if it is, whether it's
      * the primary focus. Can be 'hidden', 'visible' or 'visible-blurred'.
      *
-     * @type {string}
+     * @type {"hidden"|"visible"|"visible-blurred"|null}
      * @ignore
      */
     get visibilityState() {
-        if (!this._session)
+        if (!this._session) {
             return null;
+        }
 
         return this._session.visibilityState;
     }

@@ -1,3 +1,5 @@
+import { PIXELFORMAT_DEPTH, PIXELFORMAT_DEPTH16, PIXELFORMAT_R32F, PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F } from '../platform/graphics/constants.js';
+
 /**
  * Subtract the color of the source fragment from the destination fragment and write the result to
  * the frame buffer.
@@ -77,7 +79,7 @@ export const BLEND_MULTIPLICATIVE2X = 7;
 export const BLEND_SCREEN = 8;
 
 /**
- * Minimum color. Check app.graphicsDevice.extBlendMinmax for support.
+ * Minimum color.
  *
  * @type {number}
  * @category Graphics
@@ -85,7 +87,7 @@ export const BLEND_SCREEN = 8;
 export const BLEND_MIN = 9;
 
 /**
- * Maximum color. Check app.graphicsDevice.extBlendMinmax for support.
+ * Maximum color.
  *
  * @type {number}
  * @category Graphics
@@ -273,81 +275,125 @@ export const LIGHTFALLOFF_LINEAR = 0;
 export const LIGHTFALLOFF_INVERSESQUARED = 1;
 
 /**
- * Render depth (color-packed on WebGL 1.0), can be used for PCF 3x3 sampling.
+ * A shadow sampling technique using 32bit shadow map that averages depth comparisons from a 3x3
+ * grid of texels for softened shadow edges.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_PCF3 = 0;
-export const SHADOW_DEPTH = 0; // alias for SHADOW_PCF3 for backwards compatibility
+export const SHADOW_PCF3_32F = 0;
+
+/** @deprecated */
+export const SHADOW_PCF3 = 0; // alias for SHADOW_PCF3_32F for backwards compatibility
 
 /**
- * Render packed variance shadow map. All shadow receivers must also cast shadows for this mode to
- * work correctly.
+ * A shadow sampling technique using a 16-bit exponential variance shadow map that leverages
+ * variance to approximate shadow boundaries, enabling soft shadows. Only supported when
+ * {@link GraphicsDevice#textureHalfFloatRenderable} is true. Falls back to {@link SHADOW_PCF3_32F},
+ * if not supported.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_VSM8 = 1;
+export const SHADOW_VSM_16F = 2;
+
+/** @deprecated */
+export const SHADOW_VSM16 = 2; // alias for SHADOW_VSM_16F for backwards compatibility
 
 /**
- * Render 16-bit exponential variance shadow map. Requires OES_texture_half_float extension. Falls
- * back to {@link SHADOW_VSM8}, if not supported.
+ * A shadow sampling technique using a 32-bit exponential variance shadow map that leverages
+ * variance to approximate shadow boundaries, enabling soft shadows. Only supported when
+ * {@link GraphicsDevice#textureFloatRenderable} is true. Falls back to {@link SHADOW_VSM_16F}, if
+ * not supported.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_VSM16 = 2;
+export const SHADOW_VSM_32F = 3;
+
+/** @deprecated */
+export const SHADOW_VSM32 = 3; // alias for SHADOW_VSM_32F for backwards compatibility
 
 /**
- * Render 32-bit exponential variance shadow map. Requires OES_texture_float extension. Falls back
- * to {@link SHADOW_VSM16}, if not supported.
+ * A shadow sampling technique using 32bit shadow map that averages depth comparisons from a 5x5
+ * grid of texels for softened shadow edges.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_VSM32 = 3;
+export const SHADOW_PCF5_32F = 4;
+
+/** @deprecated */
+export const SHADOW_PCF5 = 4;  // alias for SHADOW_PCF5_32F for backwards compatibility
 
 /**
- * Render depth buffer only, can be used for hardware-accelerated PCF 5x5 sampling. Requires
- * WebGL 2. Falls back to {@link SHADOW_PCF3} on WebGL 1.
+ * A shadow sampling technique using a 32-bit shadow map that performs a single depth comparison for
+ * sharp shadow edges.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_PCF5 = 4;
+export const SHADOW_PCF1_32F = 5;
+
+/** @deprecated */
+export const SHADOW_PCF1 = 5;  // alias for SHADOW_PCF1_32F for backwards compatibility
 
 /**
- * Render depth (color-packed on WebGL 1.0), can be used for PCF 1x1 sampling.
+ * A shadow sampling technique using a 32-bit shadow map that adjusts filter size based on blocker
+ * distance, producing realistic, soft shadow edges that vary with the light's occlusion. Note that
+ * this technique requires either {@link GraphicsDevice#textureFloatRenderable} or
+ * {@link GraphicsDevice#textureHalfFloatRenderable} to be true, and falls back to
+ * {@link SHADOW_PCF3_32F} otherwise.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_PCF1 = 5;
+export const SHADOW_PCSS_32F = 6;
 
 /**
- * Render depth as color for PCSS software filtering.
+ * A shadow sampling technique using a 16-bit shadow map that performs a single depth comparison for
+ * sharp shadow edges.
  *
  * @type {number}
  * @category Graphics
  */
-export const SHADOW_PCSS = 6;
+export const SHADOW_PCF1_16F = 7;
 
 /**
- * map of engine SHADOW__*** to a string representation
+ * A shadow sampling technique using 16-bit shadow map that averages depth comparisons from a 3x3
+ * grid of texels for softened shadow edges.
  *
- * @type {object}
+ * @type {number}
+ * @category Graphics
+ */
+export const SHADOW_PCF3_16F = 8;
+
+/**
+ * A shadow sampling technique using 16-bit shadow map that averages depth comparisons from a 3x3
+ * grid of texels for softened shadow edges.
+ *
+ * @type {number}
+ * @category Graphics
+ */
+export const SHADOW_PCF5_16F = 9;
+
+/**
+ * Information about shadow types.
+ *
+ * @type {Map<number, { name: string, format: number, pcf?: boolean, vsm?: boolean }>}
  * @ignore
- * @category Graphics
  */
-export const shadowTypeToString = {};
-shadowTypeToString[SHADOW_PCF3] = 'PCF3';
-shadowTypeToString[SHADOW_VSM8] = 'VSM8';
-shadowTypeToString[SHADOW_VSM16] = 'VSM16';
-shadowTypeToString[SHADOW_VSM32] = 'VSM32';
-shadowTypeToString[SHADOW_PCF5] = 'PCF5';
-shadowTypeToString[SHADOW_PCF1] = 'PCF1';
-shadowTypeToString[SHADOW_PCSS] = 'PCSS';
+export const shadowTypeInfo = new Map([
+    [SHADOW_PCF1_32F,    { name: 'PCF1_32F', format: PIXELFORMAT_DEPTH, pcf: true }],
+    [SHADOW_PCF3_32F,    { name: 'PCF3_32F', format: PIXELFORMAT_DEPTH, pcf: true }],
+    [SHADOW_PCF5_32F,    { name: 'PCF5_32F', format: PIXELFORMAT_DEPTH, pcf: true }],
+    [SHADOW_PCF1_16F,    { name: 'PCF1_16F', format: PIXELFORMAT_DEPTH16, pcf: true }],
+    [SHADOW_PCF3_16F,    { name: 'PCF3_16F', format: PIXELFORMAT_DEPTH16, pcf: true }],
+    [SHADOW_PCF5_16F,    { name: 'PCF5_16F', format: PIXELFORMAT_DEPTH16, pcf: true }],
+    [SHADOW_VSM_16F,     { name: 'VSM_16F', format: PIXELFORMAT_RGBA16F, vsm: true }],
+    [SHADOW_VSM_32F,     { name: 'VSM_32F', format: PIXELFORMAT_RGBA32F, vsm: true }],
+    [SHADOW_PCSS_32F,    { name: 'PCSS_32F', format: PIXELFORMAT_R32F, pcss: true }]
+]);
 
 /**
  * Box filter.
@@ -498,23 +544,6 @@ export const CUBEPROJ_NONE = 0;
 export const CUBEPROJ_BOX = 1;
 
 /**
- * Phong without energy conservation. You should only use it as a backwards compatibility with
- * older projects.
- *
- * @type {number}
- * @category Graphics
- */
-export const SPECULAR_PHONG = 0;
-
-/**
- * Energy-conserving Blinn-Phong.
- *
- * @type {number}
- * @category Graphics
- */
-export const SPECULAR_BLINN = 1;
-
-/**
  * Multiply together the primary and secondary colors.
  *
  * @type {string}
@@ -578,26 +607,14 @@ export const GAMMA_NONE = 0;
  */
 export const GAMMA_SRGB = 1;
 
-/**
- * Apply sRGB (fast) gamma correction.
- *
- * @type {number}
- * @deprecated
- * @ignore
- * @category Graphics
- */
-export const GAMMA_SRGBFAST = 2; // deprecated
+// names of the gamma correction modes
+export const gammaNames = {
+    [GAMMA_NONE]: 'NONE',
+    [GAMMA_SRGB]: 'SRGB'
+};
 
 /**
- * Apply sRGB (HDR) gamma correction.
- *
- * @type {number}
- * @category Graphics
- */
-export const GAMMA_SRGBHDR = 3;
-
-/**
- * Linear tonemapping.
+ * Linear tonemapping. The colors are preserved, but the exposure is applied.
  *
  * @type {number}
  * @category Graphics
@@ -637,6 +654,33 @@ export const TONEMAP_ACES = 3;
 export const TONEMAP_ACES2 = 4;
 
 /**
+ * Khronos PBR Neutral tonemapping curve.
+ *
+ * @type {number}
+ * @category Graphics
+ */
+export const TONEMAP_NEUTRAL = 5;
+
+/**
+ * No tonemapping or exposure is applied. Used for HDR rendering.
+ *
+ * @type {number}
+ * @category Graphics
+ */
+export const TONEMAP_NONE = 6;
+
+// names of the tonemaps
+export const tonemapNames = [
+    'LINEAR',
+    'FILMIC',
+    'HEJL',
+    'ACES',
+    'ACES2',
+    'NEUTRAL',
+    'NONE'
+];
+
+/**
  * No specular occlusion.
  *
  * @type {number}
@@ -673,8 +717,9 @@ export const SHADERDEF_SCREENSPACE = 256;
 export const SHADERDEF_TANGENTS = 512;
 export const SHADERDEF_MORPH_POSITION = 1024;
 export const SHADERDEF_MORPH_NORMAL = 2048;
-export const SHADERDEF_MORPH_TEXTURE_BASED = 4096;
-export const SHADERDEF_LMAMBIENT = 8192; // lightmaps contain ambient
+export const SHADERDEF_LMAMBIENT = 4096; // lightmaps contain ambient
+export const SHADERDEF_MORPH_TEXTURE_BASED_INT = 8192;
+export const SHADERDEF_BATCH = 16384;
 
 /**
  * The shadow map is not to be updated.
@@ -709,20 +754,14 @@ export const MASK_AFFECT_LIGHTMAPPED = 2;
 export const MASK_BAKE = 4;
 
 /**
- * Render shaded materials with gamma correction and tonemapping.
+ * Render shaded materials using forward rendering.
  *
  * @type {number}
  * @category Graphics
  */
 export const SHADER_FORWARD = 0;
 
-/**
- * Render shaded materials without gamma correction and tonemapping.
- *
- * @type {number}
- * @category Graphics
- */
-export const SHADER_FORWARDHDR = 1;
+export const SHADER_PREPASS = 1;
 
 /**
  * Render RGBA-encoded depth value.
@@ -1021,9 +1060,65 @@ export const DITHER_NONE = 'none';
 export const DITHER_BAYER8 = 'bayer8';
 
 /**
- * Opacity is dithered using a blue noise texture.
+ * Opacity is dithered using a blue noise.
  *
  * @type {string}
  * @category Graphics
  */
 export const DITHER_BLUENOISE = 'bluenoise';
+
+/**
+ * Opacity is dithered using an interleaved gradient noise.
+ *
+ * @type {string}
+ * @category Graphics
+ */
+export const DITHER_IGNNOISE = 'ignnoise';
+
+/**
+ * Name of event fired before the camera renders the scene.
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_PRERENDER = 'prerender';
+
+/**
+ * Name of event fired after the camera renders the scene.
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_POSTRENDER = 'postrender';
+
+/**
+ * Name of event fired before a layer is rendered by a camera.
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_PRERENDER_LAYER = 'prerender:layer';
+
+/**
+ * Name of event fired after a layer is rendered by a camera.
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_POSTRENDER_LAYER = 'postrender:layer';
+
+/**
+ * Name of event fired before visibility culling is performed for the camera
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_PRECULL = 'precull';
+
+/**
+ * Name of event after before visibility culling is performed for the camera
+ *
+ * @type {string}
+ * @ignore
+ */
+export const EVENT_POSTCULL = 'postcull';

@@ -1,6 +1,11 @@
 import { Vec3 } from './vec3.js';
 
 /**
+ * @import { Mat4 } from './mat4.js'
+ * @import { Quat } from './quat.js'
+ */
+
+/**
  * A 3x3 matrix.
  *
  * @category Math
@@ -91,6 +96,36 @@ class Mat3 {
     }
 
     /**
+     * Extracts the x-axis from the specified matrix.
+     *
+     * @param {Vec3} [x] - The vector to receive the x axis of the matrix.
+     * @returns {Vec3} The x-axis of the specified matrix.
+     */
+    getX(x = new Vec3()) {
+        return x.set(this.data[0], this.data[1], this.data[2]);
+    }
+
+    /**
+     * Extracts the y-axis from the specified matrix.
+     *
+     * @param {Vec3} [y] - The vector to receive the y axis of the matrix.
+     * @returns {Vec3} The y-axis of the specified matrix.
+     */
+    getY(y = new Vec3()) {
+        return y.set(this.data[3], this.data[4], this.data[5]);
+    }
+
+    /**
+     * Extracts the z-axis from the specified matrix.
+     *
+     * @param {Vec3} [z] - The vector to receive the z axis of the matrix.
+     * @returns {Vec3} The z-axis of the specified matrix.
+     */
+    getZ(z = new Vec3()) {
+        return z.set(this.data[6], this.data[7], this.data[8]);
+    }
+
+    /**
      * Reports whether two matrices are equal.
      *
      * @param {Mat3} rhs - The other matrix.
@@ -171,7 +206,7 @@ class Mat3 {
      * console.log(m.toString());
      */
     toString() {
-        return '[' + this.data.join(', ') + ']';
+        return `[${this.data.join(', ')}]`;
     }
 
     /**
@@ -212,7 +247,7 @@ class Mat3 {
     /**
      * Converts the specified 4x4 matrix to a Mat3.
      *
-     * @param {import('./mat4.js').Mat4} m - The 4x4 matrix to convert.
+     * @param {Mat4} m - The 4x4 matrix to convert.
      * @returns {Mat3} Self for chaining.
      */
     setFromMat4(m) {
@@ -235,9 +270,56 @@ class Mat3 {
     }
 
     /**
+     * Sets this matrix to the given quaternion rotation.
+     *
+     * @param {Quat} r - A quaternion rotation.
+     * @returns {Mat3} Self for chaining.
+     * @example
+     * const r = new pc.Quat(1, 2, 3, 4).normalize();
+     *
+     * const m = new pc.Mat4();
+     * m.setFromQuat(r);
+     */
+    setFromQuat(r) {
+        const qx = r.x;
+        const qy = r.y;
+        const qz = r.z;
+        const qw = r.w;
+
+        const x2 = qx + qx;
+        const y2 = qy + qy;
+        const z2 = qz + qz;
+        const xx = qx * x2;
+        const xy = qx * y2;
+        const xz = qx * z2;
+        const yy = qy * y2;
+        const yz = qy * z2;
+        const zz = qz * z2;
+        const wx = qw * x2;
+        const wy = qw * y2;
+        const wz = qw * z2;
+
+        const m = this.data;
+
+        m[0] = (1 - (yy + zz));
+        m[1] = (xy + wz);
+        m[2] = (xz - wy);
+
+        m[3] = (xy - wz);
+        m[4] = (1 - (xx + zz));
+        m[5] = (yz + wx);
+
+        m[6] = (xz + wy);
+        m[7] = (yz - wx);
+        m[8] = (1 - (xx + yy));
+
+        return this;
+    }
+
+    /**
      * Set the matrix to the inverse of the specified 4x4 matrix.
      *
-     * @param {import('./mat4.js').Mat4} src - The 4x4 matrix to invert.
+     * @param {Mat4} src - The 4x4 matrix to invert.
      * @returns {Mat3} Self for chaining.
      *
      * @ignore
@@ -299,9 +381,7 @@ class Mat3 {
     transformVector(vec, res = new Vec3()) {
         const m = this.data;
 
-        const x = vec.x;
-        const y = vec.y;
-        const z = vec.z;
+        const { x, y, z } = vec;
 
         res.x = x * m[0] + y * m[3] + z * m[6];
         res.y = x * m[1] + y * m[4] + z * m[7];

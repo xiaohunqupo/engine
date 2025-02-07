@@ -1,45 +1,55 @@
 import { Debug, DebugHelper } from '../../core/debug.js';
 import { now } from '../../core/time.js';
+import { BlueNoise } from '../../core/math/blue-noise.js';
 import { Vec2 } from '../../core/math/vec2.js';
 import { Vec3 } from '../../core/math/vec3.js';
 import { Vec4 } from '../../core/math/vec4.js';
 import { Mat3 } from '../../core/math/mat3.js';
 import { Mat4 } from '../../core/math/mat4.js';
 import { BoundingSphere } from '../../core/shape/bounding-sphere.js';
-
-import {
-    SORTKEY_DEPTH, SORTKEY_FORWARD,
-    VIEW_CENTER, PROJECTION_ORTHOGRAPHIC,
-    LIGHTTYPE_DIRECTIONAL, MASK_AFFECT_DYNAMIC, MASK_AFFECT_LIGHTMAPPED, MASK_BAKE,
-    SHADOWUPDATE_NONE, SHADOWUPDATE_THISFRAME
-} from '../constants.js';
-import { LightTextureAtlas } from '../lighting/light-texture-atlas.js';
-import { Material } from '../materials/material.js';
-import { LightCube } from '../graphics/light-cube.js';
-
 import {
     CLEARFLAG_COLOR, CLEARFLAG_DEPTH, CLEARFLAG_STENCIL,
     BINDGROUP_MESH, BINDGROUP_VIEW, UNIFORM_BUFFER_DEFAULT_SLOT_NAME,
     UNIFORMTYPE_MAT4, UNIFORMTYPE_MAT3, UNIFORMTYPE_VEC3, UNIFORMTYPE_VEC2, UNIFORMTYPE_FLOAT, UNIFORMTYPE_INT,
     SHADERSTAGE_VERTEX, SHADERSTAGE_FRAGMENT,
-    SEMANTIC_ATTR,
     CULLFACE_BACK, CULLFACE_FRONT, CULLFACE_NONE,
-    TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT, SAMPLETYPE_FLOAT, SAMPLETYPE_DEPTH
+    TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT, SAMPLETYPE_FLOAT, SAMPLETYPE_DEPTH,
+    BINDGROUP_MESH_UB
 } from '../../platform/graphics/constants.js';
 import { DebugGraphics } from '../../platform/graphics/debug-graphics.js';
 import { UniformBuffer } from '../../platform/graphics/uniform-buffer.js';
-import { BindGroup } from '../../platform/graphics/bind-group.js';
+import { BindGroup, DynamicBindGroup } from '../../platform/graphics/bind-group.js';
 import { UniformFormat, UniformBufferFormat } from '../../platform/graphics/uniform-buffer-format.js';
-import { BindGroupFormat, BindBufferFormat, BindTextureFormat } from '../../platform/graphics/bind-group-format.js';
-
+import { BindGroupFormat, BindUniformBufferFormat, BindTextureFormat } from '../../platform/graphics/bind-group-format.js';
+import {
+    SORTKEY_DEPTH, SORTKEY_FORWARD,
+    VIEW_CENTER, PROJECTION_ORTHOGRAPHIC,
+    LIGHTTYPE_DIRECTIONAL, MASK_AFFECT_DYNAMIC, MASK_AFFECT_LIGHTMAPPED, MASK_BAKE,
+    SHADOWUPDATE_NONE, SHADOWUPDATE_THISFRAME,
+    EVENT_PRECULL,
+    EVENT_POSTCULL
+} from '../constants.js';
+import { LightCube } from '../graphics/light-cube.js';
+import { getBlueNoiseTexture } from '../graphics/noise-textures.js';
+import { LightTextureAtlas } from '../lighting/light-texture-atlas.js';
+import { Material } from '../materials/material.js';
 import { ShadowMapCache } from './shadow-map-cache.js';
 import { ShadowRendererLocal } from './shadow-renderer-local.js';
 import { ShadowRendererDirectional } from './shadow-renderer-directional.js';
 import { ShadowRenderer } from './shadow-renderer.js';
 import { WorldClustersAllocator } from './world-clusters-allocator.js';
 import { RenderPassUpdateClustered } from './render-pass-update-clustered.js';
-import { getBlueNoiseTexture } from '../graphics/blue-noise-texture.js';
-import { BlueNoise } from '../../core/math/blue-noise.js';
+
+/**
+ * @import { Camera } from '../camera.js'
+ * @import { CulledInstances } from '../layer.js'
+ * @import { GraphicsDevice } from '../../platform/graphics/graphics-device.js'
+ * @import { LayerComposition } from '../composition/layer-composition.js'
+ * @import { Light } from '../light.js'
+ * @import { MeshInstance } from '../mesh-instance.js'
+ * @import { RenderTarget } from '../../platform/graphics/render-target.js'
+ * @import { Scene } from '../scene.js'
+ */
 
 let _skinUpdateIndex = 0;
 const viewProjMat = new Mat4();
@@ -50,7 +60,7 @@ const tempSphere = new BoundingSphere();
 const _flipYMat = new Mat4().setScale(1, -1, 1);
 const _tempLightSet = new Set();
 const _tempLayerSet = new Set();
-const _tempVec4 = new Vec4();
+const _dynamicBindGroup = new DynamicBindGroup();
 
 // Converts a projection matrix in OpenGL style (depth range of -1..1) to a DirectX style (depth range of 0..1).
 const _fixProjRangeMat = new Mat4().set([
@@ -104,7 +114,7 @@ class Renderer {
      * A set of visible mesh instances which need further processing before being rendered, e.g.
      * skinning or morphing. Extracted during culling.
      *
-     * @type {Set<import('../mesh-instance.js').MeshInstance>}
+     * @type {Set<MeshInstance>}
      * @private
      */
     processingMeshInstances = new Set();
@@ -118,14 +128,14 @@ class Renderer {
     /**
      * A list of all unique lights in the layer composition.
      *
-     * @type {import('../light.js').Light[]}
+     * @type {Light[]}
      */
     lights = [];
 
     /**
      * A list of all unique local lights (spot & omni) in the layer composition.
      *
-     * @type {import('../light.js').Light[]}
+     * @type {Light[]}
      */
     localLights = [];
 
@@ -133,7 +143,7 @@ class Renderer {
      * A list of unique directional shadow casting lights for each enabled camera. This is generated
      * each frame during light culling.
      *
-     * @type {Map<import('../camera.js').Camera, Array<import('../light.js').Light>>}
+     * @type {Map<Camera, Array<Light>>}
      */
     cameraDirShadowLights = new Map();
 
@@ -142,7 +152,7 @@ class Renderer {
      * is cleared each frame, and updated each time a directional light shadow is rendered for a
      * camera, and allows us to manually schedule shadow passes when a new camera needs a shadow.
      *
-     * @type {Map<import('../light.js').Light, import('../camera.js').Camera>}
+     * @type {Map<Light, Camera>}
      */
     dirLightShadows = new Map();
 
@@ -151,13 +161,12 @@ class Renderer {
     /**
      * Create a new instance.
      *
-     * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} graphicsDevice - The
-     * graphics device used by the renderer.
+     * @param {GraphicsDevice} graphicsDevice - The graphics device used by the renderer.
      */
     constructor(graphicsDevice) {
         this.device = graphicsDevice;
 
-        /** @type {import('../scene.js').Scene|null} */
+        /** @type {Scene|null} */
         this.scene = null;
 
         // TODO: allocate only when the scene has clustered lighting enabled
@@ -174,7 +183,7 @@ class Renderer {
 
         // clustered passes
         this._renderPassUpdateClustered = new RenderPassUpdateClustered(this.device, this, this.shadowRenderer,
-                                                                        this._shadowRendererLocal, this.lightTextureAtlas);
+            this._shadowRendererLocal, this.lightTextureAtlas);
 
         // view bind group format with its uniform buffer format
         this.viewUniformFormat = null;
@@ -201,7 +210,6 @@ class Renderer {
         const scope = graphicsDevice.scope;
         this.boneTextureId = scope.resolve('texture_poseMap');
         this.boneTextureSizeId = scope.resolve('texture_poseMapSize');
-        this.poseMatrixId = scope.resolve('matrix_pose[0]');
 
         this.modelMatrixId = scope.resolve('matrix_model');
         this.normalMatrixId = scope.resolve('matrix_normal');
@@ -221,6 +229,9 @@ class Renderer {
         this.cameraParamsId = scope.resolve('camera_params');
         this.viewIndexId = scope.resolve('view_index');
 
+        this.blueNoiseJitterVersion = 0;
+        this.blueNoiseJitterVec = new Vec4();
+        this.blueNoiseJitterData = new Float32Array(4);
         this.blueNoiseJitterId = scope.resolve('blueNoiseJitter');
         this.blueNoiseTextureId = scope.resolve('blueNoiseTex32');
 
@@ -231,8 +242,6 @@ class Renderer {
         this.twoSidedLightingNegScaleFactorId = scope.resolve('twoSidedLightingNegScaleFactor');
         this.twoSidedLightingNegScaleFactorId.setValue(0);
 
-        this.morphWeightsA = scope.resolve('morph_weights_a');
-        this.morphWeightsB = scope.resolve('morph_weights_b');
         this.morphPositionTex = scope.resolve('morphPositionTex');
         this.morphNormalTex = scope.resolve('morphNormalTex');
         this.morphTexParams = scope.resolve('morph_tex_params');
@@ -304,16 +313,12 @@ class Renderer {
     /**
      * Set up the viewport and the scissor for camera rendering.
      *
-     * @param {import('../camera.js').Camera} camera - The camera containing the viewport
-     * information.
-     * @param {import('../../platform/graphics/render-target.js').RenderTarget} [renderTarget] - The
-     * render target. NULL for the default one.
+     * @param {Camera} camera - The camera containing the viewport information.
+     * @param {RenderTarget} [renderTarget] - The render target. NULL for the default one.
      */
     setupViewport(camera, renderTarget) {
 
         const device = this.device;
-        DebugGraphics.pushGpuMarker(device, 'SETUP-VIEWPORT');
-
         const pixelWidth = renderTarget ? renderTarget.width : device.width;
         const pixelHeight = renderTarget ? renderTarget.height : device.height;
 
@@ -333,8 +338,6 @@ class Renderer {
             h = Math.floor(scissorRect.w * pixelHeight);
         }
         device.setScissor(x, y, w, h);
-
-        DebugGraphics.popGpuMarker(device);
     }
 
     setCameraUniforms(camera, target) {
@@ -375,7 +378,8 @@ class Renderer {
 
             // camera jitter
             const { jitter } = camera;
-            let noise = Vec4.ZERO;
+            let jitterX = 0;
+            let jitterY = 0;
             if (jitter > 0) {
 
                 // render target size
@@ -384,24 +388,32 @@ class Renderer {
 
                 // offsets
                 const offset = _haltonSequence[this.device.renderVersion % _haltonSequence.length];
-                const offsetX = jitter * (offset.x * 2 - 1) / targetWidth;
-                const offsetY = jitter * (offset.y * 2 - 1) / targetHeight;
+                jitterX = jitter * (offset.x * 2 - 1) / targetWidth;
+                jitterY = jitter * (offset.y * 2 - 1) / targetHeight;
 
                 // apply offset to projection matrix
                 projMat = _tempProjMat4.copy(projMat);
-                projMat.data[8] = offsetX;
-                projMat.data[9] = offsetY;
+                projMat.data[8] = jitterX;
+                projMat.data[9] = jitterY;
 
                 // apply offset to skybox projection matrix
                 projMatSkybox = _tempProjMat5.copy(projMatSkybox);
-                projMatSkybox.data[8] = offsetX;
-                projMatSkybox.data[9] = offsetY;
+                projMatSkybox.data[8] = jitterX;
+                projMatSkybox.data[9] = jitterY;
 
-                // blue noise vec4 - only set when jitter is enabled
-                noise = this.blueNoise.vec4(_tempVec4);
+                // blue noise vec4 - only use when jitter is enabled
+                if (this.blueNoiseJitterVersion !== this.device.renderVersion) {
+                    this.blueNoiseJitterVersion = this.device.renderVersion;
+                    this.blueNoise.vec4(this.blueNoiseJitterVec);
+                }
             }
 
-            this.blueNoiseJitterId.setValue([noise.x, noise.y, noise.z, noise.w]);
+            const jitterVec = jitter > 0 ? this.blueNoiseJitterVec : Vec4.ZERO;
+            this.blueNoiseJitterData[0] = jitterVec.x;
+            this.blueNoiseJitterData[1] = jitterVec.y;
+            this.blueNoiseJitterData[2] = jitterVec.z;
+            this.blueNoiseJitterData[3] = jitterVec.w;
+            this.blueNoiseJitterId.setValue(this.blueNoiseJitterData);
 
             this.projId.setValue(projMat.data);
             this.projSkyboxId.setValue(projMatSkybox.data);
@@ -427,6 +439,9 @@ class Renderer {
             // ViewProjection Matrix
             viewProjMat.mul2(projMat, viewMat);
             this.viewProjId.setValue(viewProjMat.data);
+
+            // store matrices needed by TAA
+            camera._storeShaderMatrices(viewProjMat, jitterX, jitterY, this.device.renderVersion);
 
             this.flipYId.setValue(flipY ? -1 : 1);
 
@@ -460,7 +475,7 @@ class Renderer {
     /**
      * Clears the active render target. If the viewport is already set up, only its area is cleared.
      *
-     * @param {import('../camera.js').Camera} camera - The camera supplying the value to clear to.
+     * @param {Camera} camera - The camera supplying the value to clear to.
      * @param {boolean} [clearColor] - True if the color buffer should be cleared. Uses the value
      * from the camera if not supplied.
      * @param {boolean} [clearDepth] - True if the depth buffer should be cleared. Uses the value
@@ -625,8 +640,7 @@ class Renderer {
     /**
      * Update skin matrices ahead of rendering.
      *
-     * @param {import('../mesh-instance.js').MeshInstance[]|Set<import('../mesh-instance.js').MeshInstance>} drawCalls - MeshInstances
-     * containing skinInstance.
+     * @param {MeshInstance[]|Set<MeshInstance>} drawCalls - MeshInstances containing skinInstance.
      * @ignore
      */
     updateGpuSkinMatrices(drawCalls) {
@@ -651,8 +665,7 @@ class Renderer {
     /**
      * Update morphing ahead of rendering.
      *
-     * @param {import('../mesh-instance.js').MeshInstance[]|Set<import('../mesh-instance.js').MeshInstance>} drawCalls - MeshInstances
-     * containing morphInstance.
+     * @param {MeshInstance[]|Set<MeshInstance>} drawCalls - MeshInstances containing morphInstance.
      * @ignore
      */
     updateMorphing(drawCalls) {
@@ -675,8 +688,7 @@ class Renderer {
     /**
      * Update gsplats ahead of rendering.
      *
-     * @param {import('../mesh-instance.js').MeshInstance[]|Set<import('../mesh-instance.js').MeshInstance>} drawCalls - MeshInstances
-     * containing gsplatInstances.
+     * @param {MeshInstance[]|Set<MeshInstance>} drawCalls - MeshInstances containing gsplatInstances.
      * @ignore
      */
     updateGSplats(drawCalls) {
@@ -688,8 +700,7 @@ class Renderer {
     /**
      * Update draw calls ahead of rendering.
      *
-     * @param {import('../mesh-instance.js').MeshInstance[]|Set<import('../mesh-instance.js').MeshInstance>} drawCalls - MeshInstances
-     * requiring updates.
+     * @param {MeshInstance[]|Set<MeshInstance>} drawCalls - MeshInstances requiring updates.
      * @ignore
      */
     gpuUpdate(drawCalls) {
@@ -710,39 +721,17 @@ class Renderer {
 
         if (morphInstance) {
 
-            if (morphInstance.morph.useTextureMorph) {
+            morphInstance.prepareRendering(device);
 
-                // vertex buffer with vertex ids
-                device.setVertexBuffer(morphInstance.morph.vertexBufferIds);
+            // vertex buffer with vertex ids
+            device.setVertexBuffer(morphInstance.morph.vertexBufferIds);
 
-                // textures
-                this.morphPositionTex.setValue(morphInstance.texturePositions);
-                this.morphNormalTex.setValue(morphInstance.textureNormals);
+            // textures
+            this.morphPositionTex.setValue(morphInstance.texturePositions);
+            this.morphNormalTex.setValue(morphInstance.textureNormals);
 
-                // texture params
-                this.morphTexParams.setValue(morphInstance._textureParams);
-
-            } else {    // vertex attributes based morphing
-
-                for (let t = 0; t < morphInstance._activeVertexBuffers.length; t++) {
-
-                    const vb = morphInstance._activeVertexBuffers[t];
-                    if (vb) {
-
-                        // patch semantic for the buffer to current ATTR slot (using ATTR8 - ATTR15 range)
-                        const semantic = SEMANTIC_ATTR + (t + 8);
-                        vb.format.elements[0].name = semantic;
-                        vb.format.elements[0].scopeId = device.scope.resolve(semantic);
-                        vb.format.update();
-
-                        device.setVertexBuffer(vb);
-                    }
-                }
-
-                // set all 8 weights
-                this.morphWeightsA.setValue(morphInstance._shaderMorphWeightsA);
-                this.morphWeightsB.setValue(morphInstance._shaderMorphWeightsB);
-            }
+            // texture params
+            this.morphTexParams.setValue(morphInstance._textureParams);
         }
     }
 
@@ -750,13 +739,10 @@ class Renderer {
         const skinInstance = meshInstance.skinInstance;
         if (skinInstance) {
             this._skinDrawCalls++;
-            if (device.supportsBoneTextures) {
-                const boneTexture = skinInstance.boneTexture;
-                this.boneTextureId.setValue(boneTexture);
-                this.boneTextureSizeId.setValue(skinInstance.boneTextureSize);
-            } else {
-                this.poseMatrixId.setValue(skinInstance.matrixPalette);
-            }
+
+            const boneTexture = skinInstance.boneTexture;
+            this.boneTextureId.setValue(boneTexture);
+            this.boneTextureSizeId.setValue(skinInstance.boneTextureSize);
         }
     }
 
@@ -775,37 +761,37 @@ class Renderer {
 
             // format of the view uniform buffer
             const uniforms = [
-                new UniformFormat("matrix_viewProjection", UNIFORMTYPE_MAT4),
-                new UniformFormat("cubeMapRotationMatrix", UNIFORMTYPE_MAT3),
-                new UniformFormat("view_position", UNIFORMTYPE_VEC3),
-                new UniformFormat("skyboxIntensity", UNIFORMTYPE_FLOAT),
-                new UniformFormat("exposure", UNIFORMTYPE_FLOAT),
-                new UniformFormat("textureBias", UNIFORMTYPE_FLOAT)
+                new UniformFormat('matrix_viewProjection', UNIFORMTYPE_MAT4),
+                new UniformFormat('cubeMapRotationMatrix', UNIFORMTYPE_MAT3),
+                new UniformFormat('view_position', UNIFORMTYPE_VEC3),
+                new UniformFormat('skyboxIntensity', UNIFORMTYPE_FLOAT),
+                new UniformFormat('exposure', UNIFORMTYPE_FLOAT),
+                new UniformFormat('textureBias', UNIFORMTYPE_FLOAT)
             ];
 
             if (isClustered) {
                 uniforms.push(...[
-                    new UniformFormat("clusterCellsCountByBoundsSize", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterTextureSize", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterBoundsMin", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterBoundsDelta", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterCellsDot", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterCellsMax", UNIFORMTYPE_VEC3),
-                    new UniformFormat("clusterCompressionLimit0", UNIFORMTYPE_VEC2),
-                    new UniformFormat("shadowAtlasParams", UNIFORMTYPE_VEC2),
-                    new UniformFormat("clusterMaxCells", UNIFORMTYPE_INT),
-                    new UniformFormat("clusterSkip", UNIFORMTYPE_FLOAT)
+                    new UniformFormat('clusterCellsCountByBoundsSize', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterTextureSize', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterBoundsMin', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterBoundsDelta', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterCellsDot', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterCellsMax', UNIFORMTYPE_VEC3),
+                    new UniformFormat('clusterCompressionLimit0', UNIFORMTYPE_VEC2),
+                    new UniformFormat('shadowAtlasParams', UNIFORMTYPE_VEC2),
+                    new UniformFormat('clusterMaxCells', UNIFORMTYPE_INT),
+                    new UniformFormat('clusterSkip', UNIFORMTYPE_FLOAT)
                 ]);
             }
 
             this.viewUniformFormat = new UniformBufferFormat(this.device, uniforms);
 
             // format of the view bind group - contains single uniform buffer, and some textures
-            const buffers = [
-                new BindBufferFormat(UNIFORM_BUFFER_DEFAULT_SLOT_NAME, SHADERSTAGE_VERTEX | SHADERSTAGE_FRAGMENT)
-            ];
+            const formats = [
 
-            const textures = [
+                // uniform buffer needs to be first, as the shader processor assumes slot 0 for it
+                new BindUniformBufferFormat(UNIFORM_BUFFER_DEFAULT_SLOT_NAME, SHADERSTAGE_VERTEX | SHADERSTAGE_FRAGMENT),
+
                 new BindTextureFormat('lightsTextureFloat', SHADERSTAGE_FRAGMENT, TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT),
                 new BindTextureFormat('lightsTexture8', SHADERSTAGE_FRAGMENT, TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT),
                 new BindTextureFormat('shadowAtlasTexture', SHADERSTAGE_FRAGMENT, TEXTUREDIMENSION_2D, SAMPLETYPE_DEPTH),
@@ -816,21 +802,21 @@ class Renderer {
             ];
 
             if (isClustered) {
-                textures.push(...[
+                formats.push(...[
                     new BindTextureFormat('clusterWorldTexture', SHADERSTAGE_FRAGMENT, TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT)
                 ]);
             }
 
-            this.viewBindGroupFormat = new BindGroupFormat(this.device, buffers, textures);
+            this.viewBindGroupFormat = new BindGroupFormat(this.device, formats);
         }
     }
 
     setupViewUniformBuffers(viewBindGroups, viewUniformFormat, viewBindGroupFormat, viewCount) {
 
-        Debug.assert(Array.isArray(viewBindGroups), "viewBindGroups must be an array");
+        Debug.assert(Array.isArray(viewBindGroups), 'viewBindGroups must be an array');
 
         const device = this.device;
-        Debug.assert(viewCount === 1, "This code does not handle the viewCount yet");
+        Debug.assert(viewCount === 1, 'This code does not handle the viewCount yet');
 
         while (viewBindGroups.length < viewCount) {
             const ub = new UniformBuffer(device, viewUniformFormat, false);
@@ -860,16 +846,16 @@ class Renderer {
 
             // update mesh bind group / uniform buffer
             const meshBindGroup = shaderInstance.getBindGroup(device);
-
-            meshBindGroup.defaultUniformBuffer.update();
             meshBindGroup.update();
             device.setBindGroup(BINDGROUP_MESH, meshBindGroup);
+
+            const meshUniformBuffer = shaderInstance.getUniformBuffer(device);
+            meshUniformBuffer.update(_dynamicBindGroup);
+            device.setBindGroup(BINDGROUP_MESH_UB, _dynamicBindGroup.bindGroup, _dynamicBindGroup.offsets);
         }
     }
 
     drawInstance(device, meshInstance, mesh, style, normal) {
-
-        DebugGraphics.pushGpuMarker(device, meshInstance.node.name);
 
         const modelMatrix = meshInstance.node.worldTransform;
         this.modelMatrixId.setValue(modelMatrix.data);
@@ -883,37 +869,35 @@ class Renderer {
                 this._instancedDrawCalls++;
                 device.setVertexBuffer(instancingData.vertexBuffer);
                 device.draw(mesh.primitive[style], instancingData.count);
+            } else {
+                device.clearVertexBuffer();
             }
         } else {
             device.draw(mesh.primitive[style]);
         }
-
-        DebugGraphics.popGpuMarker(device);
     }
 
     // used for stereo
     drawInstance2(device, meshInstance, mesh, style) {
-
-        DebugGraphics.pushGpuMarker(device, meshInstance.node.name);
 
         const instancingData = meshInstance.instancingData;
         if (instancingData) {
             if (instancingData.count > 0) {
                 this._instancedDrawCalls++;
                 device.draw(mesh.primitive[style], instancingData.count, true);
+            } else {
+                device.clearVertexBuffer();
             }
         } else {
             // matrices are already set
             device.draw(mesh.primitive[style], undefined, true);
         }
-
-        DebugGraphics.popGpuMarker(device);
     }
 
     /**
-     * @param {import('../camera.js').Camera} camera - The camera used for culling.
-     * @param {import('../mesh-instance.js').MeshInstance[]} drawCalls - Draw calls to cull.
-     * @param {import('../layer.js').CulledInstances} culledInstances - Stores culled instances.
+     * @param {Camera} camera - The camera used for culling.
+     * @param {MeshInstance[]} drawCalls - Draw calls to cull.
+     * @param {CulledInstances} culledInstances - Stores culled instances.
      */
     cull(camera, drawCalls, culledInstances) {
         // #if _PROFILER
@@ -1057,12 +1041,11 @@ class Renderer {
     }
 
     /**
-     * Shadow map culling for directional and visible local lights
-     * visible meshInstances are collected into light._renderData, and are marked as visible
-     * for directional lights also shadow camera matrix is set up
+     * Shadow map culling for directional and visible local lights visible meshInstances are
+     * collected into light._renderData, and are marked as visible for directional lights also
+     * shadow camera matrix is set up.
      *
-     * @param {import('../composition/layer-composition.js').LayerComposition} comp - The layer
-     * composition.
+     * @param {LayerComposition} comp - The layer composition.
      */
     cullShadowmaps(comp) {
 
@@ -1137,11 +1120,10 @@ class Renderer {
     }
 
     /**
-     * visibility culling of lights, meshInstances, shadows casters
-     * Also applies meshInstance.visible
+     * visibility culling of lights, meshInstances, shadows casters. Also applies
+     * `meshInstance.visible`.
      *
-     * @param {import('../composition/layer-composition.js').LayerComposition} comp - The layer
-     * composition.
+     * @param {LayerComposition} comp - The layer composition.
      */
     cullComposition(comp) {
 
@@ -1149,16 +1131,24 @@ class Renderer {
         const cullTime = now();
         // #endif
 
+        const { scene } = this;
+
         this.processingMeshInstances.clear();
 
         // for all cameras
         const numCameras = comp.cameras.length;
+        this._camerasRendered += numCameras;
+
         for (let i = 0; i < numCameras; i++) {
             const camera = comp.cameras[i];
 
-            let currentRenderTarget;
-            let cameraChanged = true;
-            this._camerasRendered++;
+            // event before the camera is culling
+            scene?.fire(EVENT_PRECULL, camera);
+
+            // update camera and frustum
+            const renderTarget = camera.renderTarget;
+            camera.frameUpdate(renderTarget);
+            this.updateCameraFrustum(camera.camera);
 
             // for all of its enabled layers
             const layerIds = camera.layers;
@@ -1166,35 +1156,23 @@ class Renderer {
                 const layer = comp.getLayerById(layerIds[j]);
                 if (layer && layer.enabled) {
 
-                    // update camera and frustum when the render target changes
-                    // TODO: This is done here to handle the backwards compatibility with the deprecated Layer.renderTarget,
-                    // when this is no longer needed, this code can be moved up to execute once per camera.
-                    const renderTarget = camera.renderTarget ?? layer.renderTarget;
-                    if (cameraChanged || renderTarget !== currentRenderTarget) {
-                        cameraChanged = false;
-                        currentRenderTarget = renderTarget;
-                        camera.frameUpdate(renderTarget);
-                        this.updateCameraFrustum(camera.camera);
-                    }
-
                     // cull each layer's non-directional lights once with each camera
                     // lights aren't collected anywhere, but marked as visible
                     this.cullLights(camera.camera, layer._lights);
 
                     // cull mesh instances
-                    layer.onPreCull?.(comp.camerasMap.get(camera));
-
                     const culledInstances = layer.getCulledInstances(camera.camera);
                     this.cull(camera.camera, layer.meshInstances, culledInstances);
-
-                    layer.onPostCull?.(comp.camerasMap.get(camera));
                 }
             }
+
+            // event after the camera is done with culling
+            scene?.fire(EVENT_POSTCULL, camera);
         }
 
         // update shadow / cookie atlas allocation for the visible lights. Update it after the ligthts were culled,
         // but before shadow maps were culling, as it might force some 'update once' shadows to cull.
-        if (this.scene.clusteredLightingEnabled) {
+        if (scene.clusteredLightingEnabled) {
             this.updateLightTextureAtlas();
         }
 
@@ -1207,7 +1185,7 @@ class Renderer {
     }
 
     /**
-     * @param {import('../mesh-instance.js').MeshInstance[]} drawCalls - Mesh instances.
+     * @param {MeshInstance[]} drawCalls - Mesh instances.
      * @param {boolean} onlyLitShaders - Limits the update to shaders affected by lighting.
      */
     updateShaders(drawCalls, onlyLitShaders) {
@@ -1224,8 +1202,9 @@ class Renderer {
 
                         if (onlyLitShaders) {
                             // skip materials not using lighting
-                            if (!mat.useLighting || (mat.emitter && !mat.emitter.lighting))
+                            if (!mat.useLighting || (mat.emitter && !mat.emitter.lighting)) {
                                 continue;
+                            }
                         }
 
                         // clear shader variants on the material and also on mesh instances that use it
@@ -1245,13 +1224,12 @@ class Renderer {
     }
 
     /**
-     * @param {import('../composition/layer-composition.js').LayerComposition} comp - The layer
-     * composition to update.
+     * @param {LayerComposition} comp - The layer composition to update.
      */
     beginFrame(comp) {
 
         const scene = this.scene;
-        const updateShaders = scene.updateShaders;
+        const updateShaders = scene.updateShaders || this.device._shadersDirty;
 
         let totalMeshInstances = 0;
         const layers = comp.layerList;
@@ -1288,9 +1266,10 @@ class Renderer {
 
         // update shaders if needed
         if (updateShaders) {
-            const onlyLitShaders = !scene.updateShaders;
+            const onlyLitShaders = !scene.updateShaders || !this.device._shadersDirty;
             this.updateShaders(_tempMeshInstances, onlyLitShaders);
             scene.updateShaders = false;
+            this.device._shadersDirty = false;
             scene._shaderVersion++;
         }
 
@@ -1318,8 +1297,7 @@ class Renderer {
     /**
      * Updates the layer composition for rendering.
      *
-     * @param {import('../composition/layer-composition.js').LayerComposition} comp - The layer
-     * composition to update.
+     * @param {LayerComposition} comp - The layer composition to update.
      */
     updateLayerComposition(comp) {
 
@@ -1328,10 +1306,6 @@ class Renderer {
         // #endif
 
         const len = comp.layerList.length;
-        for (let i = 0; i < len; i++) {
-            comp.layerList[i]._postRenderCounter = 0;
-        }
-
         const scene = this.scene;
         const shaderVersion = scene._shaderVersion;
         for (let i = 0; i < len; i++) {
@@ -1343,16 +1317,6 @@ class Renderer {
             layer._shadowDrawCalls = 0;
             layer._renderTime = 0;
             // #endif
-
-            layer._preRenderCalledForCameras = 0;
-            layer._postRenderCalledForCameras = 0;
-            const transparent = comp.subLayerList[i];
-            if (transparent) {
-                layer._postRenderCounter |= 2;
-            } else {
-                layer._postRenderCounter |= 1;
-            }
-            layer._postRenderCounterMax = layer._postRenderCounter;
         }
 
         // update composition

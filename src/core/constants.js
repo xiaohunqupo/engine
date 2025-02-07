@@ -96,6 +96,14 @@ export const TRACEID_VRAM_VB = 'VRAM.Vb';
 export const TRACEID_VRAM_IB = 'VRAM.Ib';
 
 /**
+ * Logs the vram use by the storage buffers.
+ *
+ * @type {string}
+ * @category Debug
+ */
+export const TRACEID_VRAM_SB = 'VRAM.Sb';
+
+/**
  * Logs the creation of bind groups.
  *
  * @type {string}
@@ -141,7 +149,7 @@ export const TRACEID_PIPELINELAYOUT_ALLOC = 'PipelineLayoutAlloc';
  * @type {string}
  * @category Debug
  */
-export const TRACE_ID_ELEMENT = "Element";
+export const TRACE_ID_ELEMENT = 'Element';
 
 /**
  * Logs the vram use by all textures in memory.

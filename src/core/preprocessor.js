@@ -4,22 +4,25 @@ import { Debug } from './debug.js';
 const TRACEID = 'Preprocessor';
 
 // accepted keywords
-const KEYWORD = /[ \t]*#(ifn?def|if|endif|else|elif|define|undef|extension)/g;
+const KEYWORD = /[ \t]*#(ifn?def|if|endif|else|elif|define|undef|extension|include)/g;
 
 // #define EXPRESSION
+// eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/optimal-quantifier-concatenation
 const DEFINE = /define[ \t]+([^\n]+)\r?(?:\n|$)/g;
 
 // #extension IDENTIFIER : enabled
 const EXTENSION = /extension[ \t]+([\w-]+)[ \t]*:[ \t]*(enable|require)/g;
 
 // #undef EXPRESSION
+// eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/optimal-quantifier-concatenation
 const UNDEF = /undef[ \t]+([^\n]+)\r?(?:\n|$)/g;
 
 // #ifdef/#ifndef SOMEDEFINE, #if EXPRESSION
+// eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-unused-capturing-group
 const IF = /(ifdef|ifndef|if)[ \t]*([^\r\n]+)\r?\n/g;
 
 // #endif/#else or #elif EXPRESSION
-const ENDIF = /(endif|else|elif)([ \t]+[^\r\n]+)?\r?(?:\n|$)/g;
+const ENDIF = /(endif|else|elif)([ \t][^\r\n]+)?\r?(?:\n|$)/g;
 
 // identifier
 const IDENTIFIER = /([\w-]+)/;
@@ -27,36 +30,49 @@ const IDENTIFIER = /([\w-]+)/;
 // [!]defined(EXPRESSION)
 const DEFINED = /(!|\s)?defined\(([\w-]+)\)/;
 
+// Matches comparison operators like ==, !=, <, <=, >, >=
+const COMPARISON = /([a-z_]\w*)\s*(==|!=|<|<=|>|>=)\s*([\w"']+)/i;
+
 // currently unsupported characters in the expression: | & < > = + -
-const INVALID = /[><=|&+-]/g;
+const INVALID = /[|&+-]/g;
+
+// #include "identifier"
+const INCLUDE = /include[ \t]+"([\w-]+)"\r?(?:\n|$)/g;
 
 /**
  * Pure static class implementing subset of C-style preprocessor.
  * inspired by: https://github.com/dcodeIO/Preprocessor.js
- *
- * @ignore
  */
 class Preprocessor {
+    static sourceName;
+
     /**
      * Run c-like preprocessor on the source code, and resolves the code based on the defines and ifdefs
      *
      * @param {string} source - The source code to work on.
-     * @param {boolean} [stripUnusedColorAttachments] - If true, strips unused color attachments.
+     * @param {Map<string, string>} [includes] - A map containing key-value pairs of include names
+     * and their content. These are used for resolving #include directives in the source.
+     * @param {object} [options] - Optional parameters.
+     * @param {boolean} [options.stripUnusedColorAttachments] - If true, strips unused color attachments.
+     * @param {boolean} [options.stripDefines] - If true, strips all defines from the source.
+     * @param {string} [options.sourceName] - The name of the source file.
      * @returns {string|null} Returns preprocessed source code, or null in case of error.
      */
-    static run(source, stripUnusedColorAttachments = false) {
+    static run(source, includes = new Map(), options = {}) {
+
+        Preprocessor.sourceName = options.sourceName;
 
         // strips comments, handles // and many cases of /*
-        source = source.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+        source = this.stripComments(source);
 
         // right trim each line
         source = source.split(/\r?\n/)
-            .map(line => line.trimEnd())
-            .join('\n');
+        .map(line => line.trimEnd())
+        .join('\n');
 
         // generate defines to remove unused color attachments
         const defines = new Map();
-        if (stripUnusedColorAttachments) {
+        if (options.stripUnusedColorAttachments) {
 
             // find out how many times pcFragColorX is used (see gles3.js)
             const counts = new Map();
@@ -76,7 +92,7 @@ class Preprocessor {
         }
 
         // preprocess defines / ifdefs ..
-        source = this._preprocess(source, defines);
+        source = this._preprocess(source, defines, includes, options.stripDefines);
 
         // extract defines that evaluate to an integer number
         const intDefines = new Map();
@@ -86,13 +102,31 @@ class Preprocessor {
             }
         });
 
+        // extract defines with name starting with __INJECT_
+        const injectDefines = new Map();
+        defines.forEach((value, key) => {
+            if (key.startsWith('__INJECT_')) {
+                injectDefines.set(key, value);
+            }
+        });
+
+        // strip comments again after the includes have been resolved
+        source = this.stripComments(source);
+
         // remove empty lines
         source = this.RemoveEmptyLines(source);
 
         // process array sizes
         source = this.processArraySize(source, intDefines);
 
+        // inject defines
+        source = this.injectDefines(source, injectDefines);
+
         return source;
+    }
+
+    static stripComments(source) {
+        return source.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
     }
 
     static processArraySize(source, intDefines) {
@@ -108,17 +142,39 @@ class Preprocessor {
         return source;
     }
 
+    static injectDefines(source, injectDefines) {
+
+        if (source !== null && injectDefines.size > 0) {
+
+            // replace all instances of the injected defines with the value itself
+            const lines = source.split('\n');
+            injectDefines.forEach((value, key) => {
+                const regex = new RegExp(`\\b${key}\\b`, 'g');
+                for (let i = 0; i < lines.length; i++) {
+
+                    // replace them on lines that do not contain a preprocessor directive (the define itself for example)
+                    if (!lines[i].includes('#')) {
+                        lines[i] = lines[i].replace(regex, value);
+                    }
+                }
+            });
+            source = lines.join('\n');
+        }
+
+        return source;
+    }
+
     static RemoveEmptyLines(source) {
 
         if (source !== null) {
             source = source.split(/\r?\n/)
 
-                // convert lines with only white space into empty string
-                .map(line => (line.trim() === '' ? '' : line))
-                .join('\n');
+            // convert lines with only white space into empty string
+            .map(line => (line.trim() === '' ? '' : line))
+            .join('\n');
 
             // remove more than 1 consecutive empty lines
-            source = source.replace(/(\n\n){3,}/gm, '\n\n');
+            source = source.replace(/(\n\n){3,}/g, '\n\n');
         }
 
         return source;
@@ -131,9 +187,12 @@ class Preprocessor {
      * @param {Map<string, string>} defines - Supplied defines which are used in addition to those
      * defined in the source code. Maps a define name to its value. Note that the map is modified
      * by the function.
+     * @param {Map<string, string>} [includes] - An object containing key-value pairs of include names and their
+     * content.
+     * @param {boolean} [stripDefines] - If true, strips all defines from the source.
      * @returns {string} Returns preprocessed source code.
      */
-    static _preprocess(source, defines = new Map()) {
+    static _preprocess(source, defines = new Map(), includes, stripDefines) {
 
         const originalSource = source;
 
@@ -162,19 +221,29 @@ class Preprocessor {
                     const identifierValue = IDENTIFIER.exec(expression);
                     const identifier = identifierValue[1];
                     let value = expression.substring(identifier.length).trim();
-                    if (value === "") value = "true";
+                    if (value === '') value = 'true';
 
                     // are we inside if-blocks that are accepted
                     const keep = Preprocessor._keep(stack);
 
                     if (keep) {
                         defines.set(identifier, value);
+
+                        if (stripDefines) {
+                            // cut out the define line
+                            source = source.substring(0, define.index - 1) + source.substring(DEFINE.lastIndex);
+
+                            // continue processing on the next symbol
+                            KEYWORD.lastIndex = define.index - 1;
+                        }
                     }
 
-                    Debug.trace(TRACEID, `${keyword}: [${identifier}] ${value} ${keep ? "" : "IGNORED"}`);
+                    Debug.trace(TRACEID, `${keyword}: [${identifier}] ${value} ${keep ? '' : 'IGNORED'}`);
 
                     // continue on the next line
-                    KEYWORD.lastIndex = define.index + define[0].length;
+                    if (!stripDefines) {
+                        KEYWORD.lastIndex = define.index + define[0].length;
+                    }
                     break;
                 }
 
@@ -191,12 +260,22 @@ class Preprocessor {
                     // remove it from defines
                     if (keep) {
                         defines.delete(identifier);
+
+                        if (stripDefines) {
+                            // cut out the undef line
+                            source = source.substring(0, undef.index - 1) + source.substring(UNDEF.lastIndex);
+
+                            // continue processing on the next symbol
+                            KEYWORD.lastIndex = undef.index - 1;
+                        }
                     }
 
-                    Debug.trace(TRACEID, `${keyword}: [${identifier}] ${keep ? "" : "IGNORED"}`);
+                    Debug.trace(TRACEID, `${keyword}: [${identifier}] ${keep ? '' : 'IGNORED'}`);
 
                     // continue on the next line
-                    KEYWORD.lastIndex = undef.index + undef[0].length;
+                    if (!stripDefines) {
+                        KEYWORD.lastIndex = undef.index + undef[0].length;
+                    }
                     break;
                 }
 
@@ -212,10 +291,10 @@ class Preprocessor {
                         const keep = Preprocessor._keep(stack);
 
                         if (keep) {
-                            defines.set(identifier, "true");
+                            defines.set(identifier, 'true');
                         }
 
-                        Debug.trace(TRACEID, `${keyword}: [${identifier}] ${keep ? "" : "IGNORED"}`);
+                        Debug.trace(TRACEID, `${keyword}: [${identifier}] ${keep ? '' : 'IGNORED'}`);
                     }
 
                     // continue on the next line
@@ -266,8 +345,8 @@ class Preprocessor {
                     const blockInfo = stack.pop();
 
                     // code between if and endif
-                    const blockCode = blockInfo.keep ? source.substring(blockInfo.end, match.index) : "";
-                    Debug.trace(TRACEID, `${keyword}: [previous block] => ${blockCode !== ""}`);
+                    const blockCode = blockInfo.keep ? source.substring(blockInfo.end, match.index) : '';
+                    Debug.trace(TRACEID, `${keyword}: [previous block] => ${blockCode !== ''}`);
 
                     // cut out the IF and ENDIF lines, leave block if required
                     source = source.substring(0, blockInfo.start) + blockCode + source.substring(ENDIF.lastIndex);
@@ -301,11 +380,41 @@ class Preprocessor {
 
                     break;
                 }
+
+                case 'include': {
+                    // match the include
+                    INCLUDE.lastIndex = match.index;
+                    const include = INCLUDE.exec(source);
+                    error ||= include === null;
+                    Debug.assert(include, `Invalid [${keyword}]: ${source.substring(match.index, match.index + 100)}...`);
+                    const identifier = include[1].trim();
+
+                    // are we inside if-blocks that are accepted
+                    const keep = Preprocessor._keep(stack);
+
+                    if (keep) {
+
+                        // cut out the include line and replace it with the included string
+                        const includeSource = includes?.get(identifier);
+                        if (includeSource !== undefined) {
+                            source = source.substring(0, include.index - 1) + includeSource + source.substring(INCLUDE.lastIndex);
+
+                            // process the just included test
+                            KEYWORD.lastIndex = include.index - 1;
+                        } else {
+                            console.error(`Include "${identifier}" not resolved while preprocessing ${Preprocessor.sourceName}`, { source: originalSource });
+                            error = true;
+                        }
+                    }
+
+                    Debug.trace(TRACEID, `${keyword}: [${identifier}] ${keep ? '' : 'IGNORED'}`);
+                    break;
+                }
             }
         }
 
         if (error) {
-            console.warn("Failed to preprocess shader: ", { source: originalSource });
+            console.warn('Failed to preprocess shader: ', { source: originalSource });
             return originalSource;
         }
 
@@ -315,8 +424,9 @@ class Preprocessor {
     // function returns true if the evaluation is inside keep branches
     static _keep(stack) {
         for (let i = 0; i < stack.length; i++) {
-            if (!stack[i].keep)
+            if (!stack[i].keep) {
                 return false;
+            }
         }
 
         return true;
@@ -324,24 +434,54 @@ class Preprocessor {
 
     /**
      * Very simple expression evaluation, handles cases:
-     * expression
-     * defined(expression)
-     * !defined(expression)
+     *
+     * - expression
+     * - defined(expression)
+     * - !defined(expression)
+     * - simple comparisons like "XX == 3" or "XX != test"
      *
      * But does not handle more complex cases, which would require more complex system:
-     * defined(A) || defined(B)
+     *
+     * - defined(A) || defined(B)
+     *
+     * @param {string} expression - The expression to evaluate.
+     * @param {Map<string, string>} defines - A map containing key-value pairs of defines.
+     * @returns {object} Returns an object containing the result of the evaluation and an error flag.
      */
     static evaluate(expression, defines) {
 
         const correct = INVALID.exec(expression) === null;
         Debug.assert(correct, `Resolving expression like this is not supported: ${expression}`);
 
-        // if the format is defined(expression), extract expression
+        // if the format is 'defined(expression)', extract expression
         let invert = false;
         const defined = DEFINED.exec(expression);
         if (defined) {
             invert = defined[1] === '!';
             expression = defined[2];
+        }
+
+        // if the expression is a comparison, evaluate it
+        const comparison = COMPARISON.exec(expression);
+        if (comparison) {
+            const left = defines.get(comparison[1]) ?? comparison[1];
+            const right = defines.get(comparison[3]) ?? comparison[3];
+            const operator = comparison[2];
+
+            let result = false;
+            switch (operator) {
+                case '==': result = left === right; break;
+                case '!=': result = left !== right; break;
+                case '<': result = left < right; break;
+                case '<=': result = left <= right; break;
+                case '>': result = left > right; break;
+                case '>=': result = left >= right; break;
+            }
+
+            return {
+                result,
+                error: !correct
+            };
         }
 
         // test if expression define exists

@@ -5,12 +5,19 @@ import { getProgramLibrary } from './get-program-library.js';
 import { Debug } from '../../core/debug.js';
 import { ShaderGenerator } from './programs/shader-generator.js';
 import { SHADERLANGUAGE_WGSL } from '../../platform/graphics/constants.js';
+import { ShaderPass } from '../shader-pass.js';
+
+/**
+ * @import { GraphicsDevice } from '../../platform/graphics/graphics-device.js'
+ * @import { ShaderProcessorOptions } from '../../platform/graphics/shader-processor-options.js'
+ * @import { CameraShaderParams } from '../camera-shader-params.js'
+ * @import { Material, ShaderVariantParams } from '../materials/material.js'
+ */
 
 /**
  * Create a shader from named shader chunks.
  *
- * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The
- * graphics device.
+ * @param {GraphicsDevice} device - The graphics device.
  * @param {string} vsName - The vertex shader chunk name.
  * @param {string} fsName - The fragment shader chunk name.
  * @param {boolean | Record<string, boolean | string | string[]>} [useTransformFeedback] - Whether
@@ -52,8 +59,7 @@ function createShader(device, vsName, fsName, useTransformFeedback = false, shad
  * compile on both WebGL and WebGPU. Specifically, these blocks are added, and should not be
  * part of provided vsCode and fsCode: shader version, shader precision, commonly used extensions.
  *
- * @param {import('../../platform/graphics/graphics-device.js').GraphicsDevice} device - The
- * graphics device.
+ * @param {GraphicsDevice} device - The graphics device.
  * @param {string} vsCode - The vertex shader code.
  * @param {string} fsCode - The fragment shader code.
  * @param {string} uniqueName - Unique name for the shader. If a shader with this name already
@@ -124,10 +130,8 @@ class ShaderGeneratorPassThrough extends ShaderGenerator {
  * Process shader using shader processing options, utilizing cache of the ProgramLibrary
  *
  * @param {Shader} shader - The shader to be processed.
- * @param {import('../../platform/graphics/shader-processor-options.js').ShaderProcessorOptions} processingOptions -
- * The shader processing options.
+ * @param {ShaderProcessorOptions} processingOptions - The shader processing options.
  * @returns {Shader} The processed shader.
- * @ignore
  */
 function processShader(shader, processingOptions) {
 
@@ -155,8 +159,8 @@ function processShader(shader, processingOptions) {
     // For now WGSL shaders need to provide their own formats as they aren't processed.
     // Make sure to copy these from the original shader.
     if (shader.definition.shaderLanguage === SHADERLANGUAGE_WGSL) {
-        variant.meshUniformBufferFormat = shader.meshUniformBufferFormat;
-        variant.meshBindGroupFormat = shader.meshBindGroupFormat;
+        variant.meshUniformBufferFormat = shaderDefinition.meshUniformBufferFormat;
+        variant.meshBindGroupFormat = shaderDefinition.meshBindGroupFormat;
     }
 
     // unregister it again
@@ -165,8 +169,25 @@ function processShader(shader, processingOptions) {
     return variant;
 }
 
+/**
+ * Create a map of defines used for shader generation for a material.
+ *
+ * @param {Material} material - The material to create the shader defines for.
+ * @param {ShaderVariantParams} params - The shader variant parameters.
+ * @returns {Map<string, string>} The map of shader defines.
+ * @ignore
+ */
+const getCoreDefines = (material, params) => {
 
-shaderChunks.createShader = createShader;
-shaderChunks.createShaderFromCode = createShaderFromCode;
+    // merge both maps, with camera shader params taking precedence
+    const defines = new Map(material.defines);
+    params.cameraShaderParams.defines.forEach((value, key) => defines.set(key, value));
 
-export { createShader, createShaderFromCode, processShader };
+    // add pass defines
+    const shaderPassInfo = ShaderPass.get(params.device).getByIndex(params.pass);
+    shaderPassInfo.defines.forEach((value, key) => defines.set(key, value));
+
+    return defines;
+};
+
+export { createShader, createShaderFromCode, processShader, getCoreDefines };

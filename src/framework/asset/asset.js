@@ -1,14 +1,16 @@
 import { path } from '../../core/path.js';
 import { Tags } from '../../core/tags.js';
-
 import { EventHandler } from '../../core/event-handler.js';
-
 import { findAvailableLocale } from '../i18n/utils.js';
-
 import { ABSOLUTE_URL } from './constants.js';
 import { AssetFile } from './asset-file.js';
 import { getApplication } from '../globals.js';
 import { http } from '../../platform/net/http.js';
+
+/**
+ * @import { AssetRegistry } from './asset-registry.js'
+ * @import { ResourceLoaderCallback } from '../handlers/loader.js'
+ */
 
 // auto incrementing number for asset ids
 let assetIdCounter = -1;
@@ -44,7 +46,6 @@ const VARIANT_DEFAULT_PRIORITY = ['pvr', 'dxt', 'etc2', 'etc1', 'basis'];
  *
  * See the {@link AssetRegistry} for details on loading resources from assets.
  *
- * @augments EventHandler
  * @category Asset
  */
 class Asset extends EventHandler {
@@ -106,6 +107,21 @@ class Asset extends EventHandler {
     static EVENT_CHANGE = 'change';
 
     /**
+     * Fired when the asset's stream download progresses.
+     *
+     * Please note:
+     * - only gsplat assets current emit this event
+     * - totalBytes may not be reliable as it is based on the content-length header of the response
+     *
+     * @event
+     * @example
+     * asset.on('progress', (receivedBytes, totalBytes) => {
+     *    console.log(`Asset ${asset.name} progress ${readBytes / totalBytes}`);
+     * });
+     */
+    static EVENT_PROGRESS = 'progress';
+
+    /**
      * Fired when we add a new localized asset id to the asset.
      *
      * @event
@@ -133,7 +149,7 @@ class Asset extends EventHandler {
      *
      * @param {string} name - A non-unique but human-readable name which can be later used to
      * retrieve the asset.
-     * @param {string} type - Type of asset. One of ["animation", "audio", "binary", "container",
+     * @param {string} type - Type of asset. One of ["animation", "audio", "binary", "bundle", "container",
      * "cubemap", "css", "font", "json", "html", "material", "model", "script", "shader", "sprite",
      * "template", text", "texture", "textureatlas"]
      * @param {object} [file] - Details about the file the asset is made from. At the least must
@@ -184,6 +200,10 @@ class Asset extends EventHandler {
         this.tags = new Tags(this);
 
         this._preload = false;
+
+        /**
+         * @type {AssetFile | null}
+         */
         this._file = null;
         this._data = data || { };
 
@@ -196,6 +216,8 @@ class Asset extends EventHandler {
 
         // This is where the loaded resource(s) will be
         this._resources = [];
+
+        this.urlObject = null;
 
         // a string-assetId dictionary that maps
         // locale to asset id
@@ -219,7 +241,7 @@ class Asset extends EventHandler {
         /**
          * The asset registry that this Asset belongs to.
          *
-         * @type {import('./asset-registry.js').AssetRegistry|null}
+         * @type {AssetRegistry|null}
          */
         this.registry = null;
 
@@ -227,7 +249,7 @@ class Asset extends EventHandler {
     }
 
     /**
-     * The asset id.
+     * Sets the asset id.
      *
      * @type {number}
      */
@@ -235,29 +257,40 @@ class Asset extends EventHandler {
         this._id = value;
     }
 
+    /**
+     * Gets the asset id.
+     *
+     * @type {number}
+     */
     get id() {
         return this._id;
     }
 
     /**
-     * The asset name.
+     * Sets the asset name.
      *
      * @type {string}
      */
     set name(value) {
-        if (this._name === value)
+        if (this._name === value) {
             return;
+        }
         const old = this._name;
         this._name = value;
         this.fire('name', this, this._name, old);
     }
 
+    /**
+     * Gets the asset name.
+     *
+     * @type {string}
+     */
     get name() {
         return this._name;
     }
 
     /**
-     * The file details or null if no file.
+     * Sets the file details or null if no file.
      *
      * @type {object}
      */
@@ -301,14 +334,19 @@ class Asset extends EventHandler {
         }
     }
 
+    /**
+     * Gets the file details or null if no file.
+     *
+     * @type {object}
+     */
     get file() {
         return this._file;
     }
 
     /**
-     * Optional JSON data that contains either the complete resource data. (e.g. in the case of a
-     * material) or additional data (e.g. in the case of a model it contains mappings from mesh to
-     * material).
+     * Sets optional asset JSON data. This contains either the complete resource data (such as in
+     * the case of a material) or additional data (such as in the case of a model which contains
+     * mappings from mesh to material).
      *
      * @type {object}
      */
@@ -320,17 +358,23 @@ class Asset extends EventHandler {
         if (value !== old) {
             this.fire('change', this, 'data', value, old);
 
-            if (this.loaded)
+            if (this.loaded) {
                 this.registry._loader.patch(this, this.registry);
+            }
         }
     }
 
+    /**
+     * Gets optional asset JSON data.
+     *
+     * @type {object}
+     */
     get data() {
         return this._data;
     }
 
     /**
-     * A reference to the resource when the asset is loaded. e.g. a {@link Texture} or a {@link Model}.
+     * Sets the asset resource. For example, a {@link Texture} or a {@link Model}.
      *
      * @type {object}
      */
@@ -340,13 +384,18 @@ class Asset extends EventHandler {
         this.fire('change', this, 'resource', value, _old);
     }
 
+    /**
+     * Gets the asset resource.
+     *
+     * @type {object}
+     */
     get resource() {
         return this._resources[0];
     }
 
     /**
-     * A reference to the resources of the asset when it's loaded. An asset can hold more runtime
-     * resources than one e.g. cubemaps.
+     * Sets the asset resources. Some assets can hold more than one runtime resource (cube maps,
+     * for example).
      *
      * @type {object[]}
      */
@@ -356,25 +405,38 @@ class Asset extends EventHandler {
         this.fire('change', this, 'resources', value, _old);
     }
 
+    /**
+     * Gets the asset resources.
+     *
+     * @type {object[]}
+     */
     get resources() {
         return this._resources;
     }
 
     /**
-     * If true the asset will be loaded during the preload phase of application set up.
+     * Sets whether to preload an asset. If true, the asset will be loaded during the preload phase
+     * of application set up.
      *
      * @type {boolean}
      */
     set preload(value) {
         value = !!value;
-        if (this._preload === value)
+        if (this._preload === value) {
             return;
+        }
 
         this._preload = value;
-        if (this._preload && !this.loaded && !this.loading && this.registry)
+        if (this._preload && !this.loaded && !this.loading && this.registry) {
             this.registry.load(this);
+        }
     }
 
+    /**
+     * Gets whether to preload an asset.
+     *
+     * @type {boolean}
+     */
     get preload() {
         return this._preload;
     }
@@ -387,8 +449,9 @@ class Asset extends EventHandler {
             // the loadFaces property should be part of the asset data block
             // because changing the flag should result in asset patch being invoked.
             // here we must invoke it manually instead.
-            if (this.loaded)
+            if (this.loaded) {
                 this.registry._loader.patch(this, this.registry);
+            }
         }
     }
 
@@ -407,18 +470,20 @@ class Asset extends EventHandler {
     getFileUrl() {
         const file = this.file;
 
-        if (!file || !file.url)
+        if (!file || !file.url) {
             return null;
+        }
 
         let url = file.url;
 
-        if (this.registry && this.registry.prefix && !ABSOLUTE_URL.test(url))
+        if (this.registry && this.registry.prefix && !ABSOLUTE_URL.test(url)) {
             url = this.registry.prefix + url;
+        }
 
         // add file hash to avoid hard-caching problems
         if (this.type !== 'script' && file.hash) {
             const separator = url.indexOf('?') !== -1 ? '&' : '?';
-            url += separator + 't=' + file.hash;
+            url += `${separator}t=${file.hash}`;
         }
 
         return url;
@@ -502,7 +567,7 @@ class Asset extends EventHandler {
         if (this.loaded) {
             callback.call(scope, this);
         } else {
-            this.once('load', function (asset) {
+            this.once('load', (asset) => {
                 callback.call(scope, asset);
             });
         }
@@ -525,13 +590,19 @@ class Asset extends EventHandler {
      * // asset.resource is null
      */
     unload() {
-        if (!this.loaded && this._resources.length === 0)
+        if (!this.loaded && this._resources.length === 0) {
             return;
+        }
 
         this.fire('unload', this);
-        this.registry.fire('unload:' + this.id, this);
+        this.registry.fire(`unload:${this.id}`, this);
 
         const old = this._resources;
+
+        if (this.urlObject) {
+            URL.revokeObjectURL(this.urlObject);
+            this.urlObject = null;
+        }
 
         // clear resources on the asset
         this.resources = [];
@@ -557,8 +628,7 @@ class Asset extends EventHandler {
      * via http.
      *
      * @param {string} loadUrl - The URL as passed into the handler
-     * @param {import('../handlers/loader.js').ResourceLoaderCallback} callback - The callback
-     * function to receive results.
+     * @param {ResourceLoaderCallback} callback - The callback function to receive results.
      * @param {Asset} [asset] - The asset
      * @param {number} maxRetries - Number of retries if http download is required
      * @ignore

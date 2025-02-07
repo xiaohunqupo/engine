@@ -7,7 +7,6 @@ import { Quat } from '../../core/math/quat.js';
  * list from {@link XrImageTracking#images}. It contains information about the tracking state as
  * well as the position and rotation of the tracked image.
  *
- * @augments EventHandler
  * @category XR
  */
 class XrTrackedImage extends EventHandler {
@@ -76,7 +75,7 @@ class XrTrackedImage extends EventHandler {
     _emulated = false;
 
     /**
-     * @type {*}
+     * @type {XRPose|null}
      * @ignore
      */
     _pose = null;
@@ -94,9 +93,7 @@ class XrTrackedImage extends EventHandler {
     _rotation = new Quat();
 
     /**
-     * The tracked image interface that is created by the Image Tracking system and is provided as
-     * a list from {@link XrImageTracking#images}. It contains information about the tracking state
-     * as well as the position and rotation of the tracked image.
+     * Create a new XrTrackedImage instance.
      *
      * @param {HTMLCanvasElement|HTMLImageElement|SVGImageElement|HTMLVideoElement|Blob|ImageData|ImageBitmap} image - Image
      * that is matching the real world image as closely as possible. Resolution of images should be
@@ -105,7 +102,7 @@ class XrTrackedImage extends EventHandler {
      * repeating patterns will reduce tracking stability.
      * @param {number} width - Width (in meters) of image in real world. Providing this value as
      * close to the real value will improve tracking quality.
-     * @hideconstructor
+     * @ignore
      */
     constructor(image, width) {
         super();
@@ -133,6 +130,11 @@ class XrTrackedImage extends EventHandler {
         this._width = value;
     }
 
+    /**
+     * Get the width (in meters) of image in real world.
+     *
+     * @type {number}
+     */
     get width() {
         return this._width;
     }
@@ -181,13 +183,13 @@ class XrTrackedImage extends EventHandler {
         }
 
         return createImageBitmap(this._image)
-            .then((bitmap) => {
-                this._bitmap = bitmap;
-                return {
-                    image: this._bitmap,
-                    widthInMeters: this._width
-                };
-            });
+        .then((bitmap) => {
+            this._bitmap = bitmap;
+            return {
+                image: this._bitmap,
+                widthInMeters: this._width
+            };
+        });
     }
 
     /**

@@ -1,14 +1,6 @@
 export default /* glsl */`
 uniform sampler2D texture_msdfMap;
 
-#ifdef GL_OES_standard_derivatives
-#define USE_FWIDTH
-#endif
-
-#ifdef GL2
-#define USE_FWIDTH
-#endif
-
 float median(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
@@ -34,6 +26,12 @@ varying vec2 shadow_offset;
 #endif
 
 vec4 applyMsdf(vec4 color) {
+
+    // Convert to linear space before processing
+    // TODO: ideally this would receive the color in linear space, but that would require larger changes
+    // on the engine side, with the way premultiplied alpha is handled as well.
+    color.rgb = gammaCorrectInput(color.rgb);
+
     // sample the field
     vec3 tsample = texture2D(texture_msdfMap, vUv0).rgb;
     vec2 uvShdw = vUv0 - shadow_offset;
@@ -46,17 +44,9 @@ vec4 applyMsdf(vec4 color) {
     // too large value (0.5) creates a dark glow around the letters
     float smoothingMax = 0.2;
 
-    #ifdef USE_FWIDTH
     // smoothing depends on size of texture on screen
     vec2 w = fwidth(vUv0);
     float smoothing = clamp(w.x * font_textureWidth / font_pxrange, 0.0, smoothingMax);
-    #else
-    float font_size = 16.0; // TODO fix this
-    // smoothing gets smaller as the font size gets bigger
-    // don't have fwidth we can approximate from font size, this doesn't account for scaling
-    // so a big font scaled down will be wrong...
-    float smoothing = clamp(font_pxrange / font_size, 0.0, smoothingMax);
-    #endif
 
     float mapMin = 0.05;
     float mapMax = clamp(1.0 - font_sdfIntensity, mapMin, 1.0);
@@ -77,6 +67,9 @@ vec4 applyMsdf(vec4 color) {
 
     vec4 scolor = (shadow > outline) ? shadow * vec4(shadow_color.a * shadow_color.rgb, shadow_color.a) : tcolor;
     tcolor = mix(scolor, tcolor, outline);
+
+    // Convert back to gamma space before returning
+    tcolor.rgb = gammaCorrectOutput(tcolor.rgb);
     
     return tcolor;
 }

@@ -1,15 +1,17 @@
 import { EventHandler } from '../../core/event-handler.js';
 import { platform } from '../../core/platform.js';
 import { Vec3 } from '../../core/math/vec3.js';
-
 import { XRHAND_LEFT } from './constants.js';
 import { XrFinger } from './xr-finger.js';
 import { XrJoint } from './xr-joint.js';
 
+/**
+ * @import { XrInputSource } from './xr-input-source.js'
+ * @import { XrManager } from './xr-manager.js'
+ */
 
 /**
  * @type {string[][]}
- * @ignore
  */
 let fingerJointIds = [];
 
@@ -30,7 +32,6 @@ if (platform.browser && window.XRHand) {
 /**
  * Represents a hand with fingers and joints.
  *
- * @augments EventHandler
  * @category XR
  */
 class XrHand extends EventHandler {
@@ -57,13 +58,13 @@ class XrHand extends EventHandler {
     static EVENT_TRACKINGLOST = 'trackinglost';
 
     /**
-     * @type {import('./xr-manager.js').XrManager}
+     * @type {XrManager}
      * @private
      */
     _manager;
 
     /**
-     * @type {import('./xr-input-source.js').XrInputSource}
+     * @type {XrInputSource}
      * @private
      */
     _inputSource;
@@ -107,9 +108,8 @@ class XrHand extends EventHandler {
     /**
      * Represents a hand with fingers and joints.
      *
-     * @param {import('./xr-input-source.js').XrInputSource} inputSource - Input Source that hand
-     * is related to.
-     * @hideconstructor
+     * @param {XrInputSource} inputSource - Input Source that hand is related to.
+     * @ignore
      */
     constructor(inputSource) {
         super();
@@ -148,7 +148,7 @@ class XrHand extends EventHandler {
     }
 
     /**
-     * @param {*} frame - XRFrame from requestAnimationFrame callback.
+     * @param {XRFrame} frame - XRFrame from requestAnimationFrame callback.
      * @ignore
      */
     update(frame) {
@@ -161,8 +161,9 @@ class XrHand extends EventHandler {
             if (jointSpace) {
                 let pose;
 
-                if (frame.session.visibilityState !== 'hidden')
+                if (frame.session.visibilityState !== 'hidden') {
                     pose = frame.getJointPose(jointSpace, this._manager._referenceSpace);
+                }
 
                 if (pose) {
                     joint.update(pose);
@@ -267,7 +268,7 @@ class XrHand extends EventHandler {
     }
 
     /**
-     * List of fingers of a hand.
+     * Array of fingers of the hand.
      *
      * @type {XrFinger[]}
      */
@@ -276,7 +277,7 @@ class XrHand extends EventHandler {
     }
 
     /**
-     * List of joints of hand.
+     * Array of joints in the hand.
      *
      * @type {XrJoint[]}
      */
@@ -285,7 +286,7 @@ class XrHand extends EventHandler {
     }
 
     /**
-     * List of joints that are fingertips.
+     * Array of joints that are fingertips.
      *
      * @type {XrJoint[]}
      */

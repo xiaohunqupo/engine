@@ -1,13 +1,14 @@
-import { Component } from '../component.js';
 import { ComponentSystem } from '../system.js';
-
 import { ButtonComponent } from './component.js';
 import { ButtonComponentData } from './data.js';
+
+/**
+ * @import { AppBase } from '../../app-base.js'
+ */
 
 const _schema = [
     'enabled',
     'active',
-    { name: 'imageEntity', type: 'entity' },
     { name: 'hitPadding', type: 'vec4' },
     'transitionMode',
     { name: 'hoverTint', type: 'rgba' },
@@ -25,15 +26,14 @@ const _schema = [
 /**
  * Manages creation of {@link ButtonComponent}s.
  *
- * @augments ComponentSystem
  * @category User Interface
  */
 class ButtonComponentSystem extends ComponentSystem {
     /**
      * Create a new ButtonComponentSystem.
      *
-     * @param {import('../../app-base.js').AppBase} app - The application.
-     * @hideconstructor
+     * @param {AppBase} app - The application.
+     * @ignore
      */
     constructor(app) {
         super(app);
@@ -51,6 +51,7 @@ class ButtonComponentSystem extends ComponentSystem {
     }
 
     initializeComponentData(component, data, properties) {
+        component.imageEntity = data.imageEntity;
         super.initializeComponentData(component, data, _schema);
     }
 
@@ -76,7 +77,5 @@ class ButtonComponentSystem extends ComponentSystem {
         this.app.systems.off('update', this.onUpdate, this);
     }
 }
-
-Component._buildAccessors(ButtonComponent.prototype, _schema);
 
 export { ButtonComponentSystem };

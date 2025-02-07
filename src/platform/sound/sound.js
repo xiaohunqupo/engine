@@ -7,15 +7,15 @@ class Sound {
     /**
      * If the Web Audio API is not supported this contains the audio data.
      *
-     * @type {HTMLAudioElement}
+     * @type {HTMLAudioElement|undefined}
      */
     audio;
 
-     /**
-      * If the Web Audio API is supported this contains the audio data.
-      *
-      * @type {AudioBuffer}
-      */
+    /**
+     * If the Web Audio API is supported this contains the audio data.
+     *
+     * @type {AudioBuffer|undefined}
+     */
     buffer;
 
     /**
