@@ -26,11 +26,11 @@ import { PickerId } from '../../../scene/picker-id.js';
  * `gsplat` which supports multiple file formats including `.ply`, `.sog`, `.meta.json` (SOG
  * format), and `.lod-meta.json` (streaming LOD format).
  *
- * You should never need to use the GSplatComponent constructor directly. To add an
+ * You should never need to use the GSplatComponent constructor directly. To add a
  * GSplatComponent to an {@link Entity}, use {@link Entity#addComponent}:
  *
  * ```javascript
- * const entity = pc.Entity();
+ * const entity = new pc.Entity();
  * entity.addComponent('gsplat', {
  *     asset: asset
  * });
@@ -47,8 +47,8 @@ import { PickerId } from '../../../scene/picker-id.js';
  *
  * ## Unified Rendering
  *
- * The {@link GSplatComponent#unified} property enables unified rendering mode, which provides
- * advanced features for Gaussian Splats:
+ * The {@link unified} property enables unified rendering mode, which provides advanced features
+ * for Gaussian Splats:
  *
  * - **Global Sorting**: Multiple splat components are sorted together in a single unified sort,
  *   eliminating visibility artifacts and popping effects when splat components overlap.
