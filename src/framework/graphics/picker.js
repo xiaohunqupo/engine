@@ -137,7 +137,6 @@ class Picker {
     /**
      * When the device is destroyed, this allows us to ignore async results.
      *
-     * @type {boolean}
      * @private
      */
     deviceValid = true;

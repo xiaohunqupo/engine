@@ -136,15 +136,11 @@ class TranslateGizmo extends TransformGizmo {
      */
     _nodePositions = new Map();
 
-    /**
-     * @override
-     */
+    /** @override */
     snapIncrement = 1;
 
     /**
      * Flips the planes to face the camera.
-     *
-     * @type {boolean}
      */
     flipPlanes = true;
 
@@ -395,9 +391,7 @@ class TranslateGizmo extends TransformGizmo {
         this._shapes.xy[prop] = value;
     }
 
-    /**
-     * @private
-     */
+    /** @private */
     _shapesLookAtCamera() {
         const cameraDir = this.cameraDir;
 
@@ -496,9 +490,7 @@ class TranslateGizmo extends TransformGizmo {
         this._renderUpdate = true;
     }
 
-    /**
-     * @private
-     */
+    /** @private */
     _storeNodePositions() {
         for (let i = 0; i < this.nodes.length; i++) {
             const node = this.nodes[i];
@@ -594,9 +586,7 @@ class TranslateGizmo extends TransformGizmo {
         }
     }
 
-    /**
-     * @override
-     */
+    /** @override */
     prerender() {
         super.prerender();
 

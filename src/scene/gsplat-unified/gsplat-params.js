@@ -119,8 +119,6 @@ class GSplatParams {
 
     /**
      * Enables debug rendering of AABBs for GSplat objects. Defaults to false.
-     *
-     * @type {boolean}
      */
     debugAabbs = false;
 
@@ -130,8 +128,6 @@ class GSplatParams {
      *
      * Note: Radial sorting helps reduce sorting artifacts when the camera rotates (looks around),
      * while linear sorting is better at minimizing artifacts when the camera translates (moves).
-     *
-     * @type {boolean}
      */
     radialSorting = false;
 
@@ -193,8 +189,6 @@ class GSplatParams {
 
     /**
      * Enables debug rendering of AABBs for GSplat octree nodes. Defaults to false.
-     *
-     * @type {boolean}
      */
     debugNodeAabbs = false;
 
@@ -202,7 +196,6 @@ class GSplatParams {
      * Internal dirty flag to trigger update of gsplat managers when some params change.
      *
      * @ignore
-     * @type {boolean}
      */
     dirty = false;
 
@@ -256,10 +249,7 @@ class GSplatParams {
         return this._debug === GSPLAT_DEBUG_LOD;
     }
 
-    /**
-     * @type {boolean}
-     * @private
-     */
+    /** @private */
     _enableIds = false;
 
     /**
@@ -296,23 +286,16 @@ class GSplatParams {
     /**
      * Distance threshold in world units to trigger LOD updates for camera and gsplat instances.
      * Defaults to 1.
-     *
-     * @type {number}
      */
     lodUpdateDistance = 1;
 
     /**
      * Angle threshold in degrees to trigger LOD updates based on camera rotation. Set to 0 to
      * disable rotation-based updates. Defaults to 0.
-     *
-     * @type {number}
      */
     lodUpdateAngle = 0;
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _lodBehindPenalty = 1;
 
     /**
@@ -340,10 +323,7 @@ class GSplatParams {
         return this._lodBehindPenalty;
     }
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _lodRangeMin = 0;
 
     /**
@@ -367,10 +347,7 @@ class GSplatParams {
         return this._lodRangeMin;
     }
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _lodRangeMax = 10;
 
     /**
@@ -394,10 +371,7 @@ class GSplatParams {
         return this._lodRangeMax;
     }
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _lodUnderfillLimit = 0;
 
     /**
@@ -424,10 +398,7 @@ class GSplatParams {
         return this._lodUnderfillLimit;
     }
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _splatBudget = 0;
 
     /**
@@ -487,16 +458,12 @@ class GSplatParams {
      * Intensity multiplier for overdraw visualization mode. Value of 1 uses alpha of 1/32,
      * allowing approximately 32 overdraws to reach full brightness with additive blending.
      * Higher values increase brightness per splat. Defaults to 1.
-     *
-     * @type {number}
      */
     colorRampIntensity = 1;
 
     /**
      * Whether to apply scene fog to Gaussian splats. When false, splats ignore fog settings
      * even if the scene or camera has fog configured. Defaults to true.
-     *
-     * @type {boolean}
      */
     useFog = true;
 
@@ -520,8 +487,6 @@ class GSplatParams {
      * splat by this amount, its SH colors are re-evaluated. Distant nodes naturally update
      * less frequently since they require more camera movement to reach the angle threshold.
      * Set to 0 to update every frame where camera moves. Defaults to 10.
-     *
-     * @type {number}
      */
     colorUpdateAngle = 10;
 
@@ -629,6 +594,7 @@ class GSplatParams {
      *
      * If the source splats were generated without anti-aliasing, enabling this
      * option may slightly soften the image or alter opacity.
+     *
      * @type {boolean}
      */
     set antiAlias(value) {
@@ -653,6 +619,7 @@ class GSplatParams {
      * was generated for 2D Gaussian Splatting.
      *
      * Enabling this with standard 3D splat data may produce incorrect results.
+     *
      * @type {boolean}
      */
     set twoDimensional(value) {
@@ -669,10 +636,7 @@ class GSplatParams {
         return !!this._material.getDefine('GSPLAT_2DGS');
     }
 
-    /**
-     * @type {number}
-     * @private
-     */
+    /** @private */
     _fisheye = 0;
 
     /**
@@ -725,8 +689,6 @@ class GSplatParams {
      * reference count reaches zero, it enters a cooldown period before being unloaded. This allows
      * recently used data to remain in memory for quick reuse if needed again soon. Set to 0 to
      * unload immediately when unused. Defaults to 100.
-     *
-     * @type {number}
      */
     cooldownTicks = 100;
 
