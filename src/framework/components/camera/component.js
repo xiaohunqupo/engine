@@ -1207,6 +1207,10 @@ class CameraComponent extends Component {
             this.addCameraToLayers();
         }
 
+        if (this.aspectRatioMode === ASPECT_AUTO) {
+            this.aspectRatio = this.calculateAspectRatio();
+        }
+
         this.postEffects.enable();
     }
 
