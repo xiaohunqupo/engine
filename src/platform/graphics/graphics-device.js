@@ -283,6 +283,27 @@ class GraphicsDevice extends EventHandler {
     supportsSubgroupId = false;
 
     /**
+     * Maximum subgroup (warp/wavefront) size supported by the device. Zero if subgroups are
+     * not supported. Used internally to gate algorithms that assume a specific subgroup size.
+     *
+     * @type {number}
+     * @ignore
+     */
+    maxSubgroupSize = 0;
+
+    /**
+     * Minimum subgroup (warp/wavefront) size supported by the device. Zero if subgroups are
+     * not supported. On hardware where min and max differ, the WGSL `subgroup_size` builtin
+     * may report any value in `[minSubgroupSize, maxSubgroupSize]`; shaders sizing shared
+     * memory by the number of subgroups in a workgroup should use the minimum to cover the
+     * worst-case subgroup count.
+     *
+     * @type {number}
+     * @ignore
+     */
+    minSubgroupSize = 0;
+
+    /**
      * Currently active render target.
      *
      * @type {RenderTarget|null}
